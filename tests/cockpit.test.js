@@ -452,6 +452,12 @@ async function ready(p) {
       for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > b[0] + b[1] + b[2]) b = [px[i], px[i + 1], px[i + 2]]; r(JSON.stringify(b)); }))`));
     check('the sky is lit at dusk, warm in the west', best[0] > 60 && best[0] > best[2], JSON.stringify(best));
     check('the loading readout goes once the world is in', await v.eval('document.getElementById("loading").hidden'));
+    // the monitor meters its picture like a camera: deep in the twilight (the default start, sun -6.7 deg) it opens
+    // up instead of showing black
+    await wait('SITE5.world.exposure > 30', 30); await v.sleep(6000);   // it adapts over a few seconds, as an eye does
+    const dim = await v.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
+      g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let s = 0, n = 0; for (let i = 0; i < px.length; i += 4 * 97) { s += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255; n++; } r(s / n); }))`);
+    check('deep twilight is visible, not black: the monitor opens up', dim > 0.05, (dim * 100).toFixed(1) + '% mean, exposure ' + (await v.eval('SITE5.world.exposure')).toFixed(0));
     await v.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(v);
     await wait('!!(SITE5.world && SITE5.world.cloudsReady)'); await v.sleep(2500);
     await v.mouse('mousePressed', 720, 760, 1); for (let y = 760; y >= 300; y -= 20) await v.mouse('mouseMoved', 720, y, 1);

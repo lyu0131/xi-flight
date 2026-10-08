@@ -172,7 +172,10 @@ const toECEF = l => new THREE.Vector3().addScaledVector(E, l[0]).addScaledVector
 const sun = new THREE.Vector3(), moon = new THREE.Vector3(), light = new THREE.Vector3(), eci = new THREE.Matrix4()
 // the city lights and stars keep their apparent brightness whatever the exposure (CITY, STAR: at exposure 1)
 const CITY = 0.28, STAR = 1.4   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
-let expo = null, lastT = 0
+let expo = null, lastT = 0, meterGoal = 0
+// the meter: the capture's mean display brightness is held near METER (dim, as a dusk should look) by opening the
+// exposure from the day's 10 up to EXPO_MAX; brighter than that (day, sunset) it stays at 10, as before
+const METER = 0.1, EXPO_MAX = 300
 S.renderers.push(function (pose, Wd, Hd) {
   if (pose.t > checkAt) { checkAt = pose.t + 2; if (S.frameMs > 21 && scale > 0.6) scale = Math.max(0.6, scale - 0.15) }
   const w = Math.max(1, Math.round(Wd * scale)), h = Math.max(1, Math.round(Hd * scale))
@@ -186,14 +189,18 @@ S.renderers.push(function (pose, Wd, Hd) {
   camera.position.copy(P); camera.up.copy(u); camera.lookAt(P.clone().add(f)); camera.updateMatrixWorld()
   // the light: the real sun (its twilight glow included) until twilight has ended (-10 deg); after that, if the moon
   // is up, the moon stands in for it everywhere at night exposure; with no moon the sun stays (a dark sky, the cities
-  // and the stars). The exposure eases over 3 s when the light changes hands.
+  // and the stars). Under the sun the monitor meters its own picture like a camera (see capture()): never below the
+  // day's 10, opening up to EXPO_MAX as the twilight dims. The exposure eases over 3 s toward its goal.
   const date = new Date(START.getTime() + pose.t * 1000)
   getSunDirectionECEF(date, sun); getMoonDirectionECEF(date, moon)
   const el = v => Math.asin(Math.max(-1, Math.min(1, v.dot(U)))) / D
   const byMoon = el(sun) < -10 && el(moon) > 2
   light.copy(byMoon ? moon : sun); world.light = byMoon ? 'moon' : 'sun'
-  const goal = byMoon ? 0.45 : 10
-  expo = expo === null || S.reduce ? goal : expo * Math.pow(goal / expo, Math.min(1, Math.max(0, pose.t - lastT) / 3)); lastT = pose.t
+  const goal = byMoon ? 0.45 : meterGoal || 10
+  // (a metered goal always eases: it's measured off frames at the exposure before, so snapping to it would swing)
+  // (wall-clock time: an eye adapts in real seconds, and the flight's clock stands still under reduced motion)
+  const now = performance.now() / 1000
+  expo = expo === null || (S.reduce && !(meterGoal && !byMoon)) ? goal : expo * Math.pow(goal / expo, Math.min(1, Math.max(0, now - lastT) / 3)); lastT = now
   const exposure = world.exposure = expo
   renderer.toneMappingExposure = exposure
   for (const o of [ap, clouds, sunLight, skyLight, starsMat]) o.sunDirection.copy(light)
@@ -235,6 +242,12 @@ function capture(pose) {
     capFaces[k] = buf; capGot |= 1 << k
     if (capGot === 63) {
       capN++
+      // meter: mean luma of the six faces (display values); the goal moves the exposure by the shortfall, display
+      // brightness going about as exposure^(1/2.2)
+      let s = 0, c = 0
+      for (const f of capFaces) for (let i = 0; i < f.length; i += 16) { s += 0.2126 * f[i] + 0.7152 * f[i + 1] + 0.0722 * f[i + 2]; c++ }
+      const mean = Math.max(s / c / 255, 1e-4)
+      meterGoal = Math.min(EXPO_MAX, Math.max(10, world.exposure * Math.pow(METER / mean, 2.2)))
       if (!S.envFreeze) S.env = { n: capN, size: CS, faces: capFaces }
       capFaces = new Array(6); capGot = 0
     }
