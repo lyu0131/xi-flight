@@ -6,6 +6,9 @@ const serve = require('./serve');
 // site5 runs over http (Cesium's workers and the streamed tiles don't work from file://): every page here is
 // opened from a local server rooted at the repo
 let srv = null;
+// ONLY=main,3d,... runs just those blocks (main, altitude, modes, traffic, controls, horizon, world, light, 3d,
+// capture, seatlight, reduce, phone); unset, everything runs
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null, want = n => !ONLY || ONLY.includes(n);
 async function launch(o) {
   const p = await launchFile(o);
   // (the old page is marked first and the wait is for it to be gone: a fixed sleep let ready() pass on the old page
@@ -19,6 +22,9 @@ async function launch(o) {
   return p;
 }
 const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0&hdg=0';   // the airways' height, at the lowest throttle, for the targeting checks
+// a read inside a frame that can't hang the run: if no frame comes within 3 s, or the read throws, it gives `none`
+const inFrame = (p, body, none) => Promise.race([p.eval(`new Promise(r => requestAnimationFrame(() => { ${body} }))`),
+  new Promise(r => setTimeout(() => r(none), 3000))]).then(v => v == null ? none : v);
 const pose = (p, expr) => p.eval(`(() => { const s = SITE5.pose; return ${expr}; })()`);
 // ready: drawing, the world (sky.js, from the CDN) up and the seat (the 11 MB glb) in and drawn: their first seconds
 // are slow, which timing checks mustn't catch. (A missing seat is ready too, with only the rings.)
@@ -30,6 +36,7 @@ async function ready(p) {
 
 (async () => {
   srv = await serve.start();
+  if (want('main')) {
   {
     const st = async u => (await fetch(srv.url(u))).status;
     check('the page loads over http', (await st('site5/index.html')) === 200 && (await st('site5/js/ball.js')) === 200);
@@ -245,8 +252,8 @@ async function ready(p) {
   check('looking down shows the controls', await p.eval('SITE5.parts.seat.grip > 4 && SITE5.parts.seat.rail > 4'), JSON.stringify(await p.eval('SITE5.parts.seat')));
   // the seat is a real 3D model on its own canvas: looking down, it fills a good part of the view, and its contact
   // shading (worked out after load) is in
-  const seatCover = await p.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.seatGL, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
-    g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 3; i < px.length; i += 4 * 16) if (px[i] > 0) n++; r(n / (px.length / 64)); }))`);
+  const seatCover = await inFrame(p, ` const g = SITE5.seatGL, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
+    g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 3; i < px.length; i += 4 * 16) if (px[i] > 0) n++; r(n / (px.length / 64)); `, NaN);
   check('looking down, the 3D seat fills a good part of the view', seatCover > 0.15, (seatCover * 100).toFixed(0) + '%');
   check('the seat contact shading is in', await p.eval('SITE5.parts.seatAO === true'));
   check('no JS errors', p.errors.length === 0, p.errors.join(' | '));
@@ -256,9 +263,10 @@ async function ready(p) {
   check('?look=penelope loads and draws', (await p.eval('SITE5.look')) === 'penelope' && await p.eval('!!SITE5.gl'));
   check('looks: no JS errors', p.errors.length === 0, p.errors.join(' | '));
   p.close();
+  }
 
   // altitude: a held climb raises it; the floor and ceiling hold; with no traffic at all nothing breaks
-  {
+  if (want('altitude')) {
     const a = await launch({ width: 1200, height: 700 });
     const hold = async (key, code, vk, ms) => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk }); await a.sleep(ms); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk }); };
     await a.goto(PAGE, 300); await ready(a);
@@ -286,7 +294,7 @@ async function ready(p) {
   }
 
   // three modes: FREE watches (keys don't fly), HYBRID shares, INPUT is yours (let go and it holds course)
-  {
+  if (want('modes')) {
     const q = await launch({ width: 1200, height: 700 });
     const BASE = '../site5/index.html?seed=7&hdg=0';
     const key = (type, k, code, vk) => q.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk });
@@ -329,7 +337,7 @@ async function ready(p) {
   }
 
   // the traffic: a close aircraft carries its W mark (the 3D models return with Phase 4 of the realism rebuild)
-  {
+  if (want('traffic')) {
     const v = await launch({ width: 1440, height: 810, reduce: true });
     await v.goto(PAGE + '&near=1', 300); await ready(v); await v.sleep(300);
     const near = JSON.parse(await v.eval(`(() => { const s = SITE5.pose, c = s.contacts.find(c => c.near); return JSON.stringify({ id: c && c.id, w: SITE5.parts.wIds, lock: s.lockId }); })()`));
@@ -340,7 +348,7 @@ async function ready(p) {
 
   // arcade controls (owner, 2026-10-07): the mouse steers, W/S throttle (it stays), Shift boosts, A/D bank into a
   // turn, Q/E yaw, a right-drag or C looks without steering; FREE ignores all of it
-  {
+  if (want('controls')) {
     const k = await launch({ width: 1200, height: 700 });
     const key = (type, kk, code, vk, mods) => k.send('Input.dispatchKeyEvent', { type, key: kk, code, windowsVirtualKeyCode: vk, modifiers: mods || 0 });
     const hold = async (kk, code, vk, ms, mods) => { await key('keyDown', kk, code, vk, mods); await k.sleep(ms); await key('keyUp', kk, code, vk, mods); };
@@ -388,7 +396,7 @@ async function ready(p) {
   }
 
   // the horizon dips with altitude as the real Earth's does; W marks only on aircraft within range
-  {
+  if (want('horizon')) {
     const e = await launch({ width: 1440, height: 810, reduce: true });
     await e.goto(PAGE, 300); await ready(e);
     const dip11 = Math.acos(6371 / 6382) * 180 / Math.PI;
@@ -402,7 +410,7 @@ async function ready(p) {
   }
 
   // the world in Three.js + Takram, through the ball (the realism rebuild)
-  {
+  if (want('world')) {
     const v = await launch({ width: 1440, height: 810, reduce: true });
     const worldUp = async () => { for (let i = 0; i < 120 && !(await v.eval('!!(SITE5.world && SITE5.world.ready)')); i++) await v.sleep(500); };
     await v.goto('../site5/index.html?seed=7&traffic=0', 300); await ready(v); await worldUp(); await v.sleep(1500);
@@ -420,8 +428,8 @@ async function ready(p) {
     const cw = JSON.parse(await v.eval('JSON.stringify(SITE5.warp(innerWidth / 2, innerHeight / 2))'));
     check('the centre maps to the centre', !!cw && Math.abs(cw[0] - 0.5) < 0.02 && Math.abs(cw[1] - 0.5) < 0.02, JSON.stringify(cw));
     // a pixel of the world canvas, read straight after it's drawn
-    const px = (x, y) => v.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, k = g.drawingBufferWidth / innerWidth, o = new Uint8Array(4);
-      g.readPixels(Math.round(${x} * k), Math.round(g.drawingBufferHeight - ${y} * k), 1, 1, g.RGBA, g.UNSIGNED_BYTE, o); r(Array.from(o.slice(0, 3))); }))`);
+    const px = (x, y) => inFrame(v, ` const g = SITE5.gl, k = g.drawingBufferWidth / innerWidth, o = new Uint8Array(4);
+      g.readPixels(Math.round(${x} * k), Math.round(g.drawingBufferHeight - ${y} * k), 1, 1, g.RGBA, g.UNSIGNED_BYTE, o); r(Array.from(o.slice(0, 3))); `, [NaN, NaN, NaN]);
     // the seams: a point midway between two neighbouring panel centres lies on a seam; it's lighter than a panel's middle
     const sp = JSON.parse(await v.eval(`(() => { const c = SITE5.panels.cells, m = SITE5.m, P = SITE5.project, near = [0, 0, 1];
       let best = null; for (const a of c) for (const b of c) { if (a === b) continue; const d = m.dot(a, b); if (d < 0.99 && d > 0.7) { const mid = m.norm([a[0] + b[0], a[1] + b[1], a[2] + b[2]]);
@@ -448,15 +456,15 @@ async function ready(p) {
 
   // the world's light and clouds: dusk glows in the west; the volumetric clouds load; on a moonless night the cities
   // still show; a world whose libraries can't load says so, and the cockpit still works
-  {
+  if (want('light')) {
     const v = await launch({ width: 1440, height: 810, reduce: true });
     const wait = async (expr, n = 120) => { for (let i = 0; i < n && !(await v.eval(expr)); i++) await v.sleep(500); return v.eval(expr); };
     await v.goto('../site5/index.html?seed=7&traffic=0&clouds=1', 300); await ready(v);   // (the clouds are off unless asked for)
     const clouds = await wait('!!(SITE5.world && SITE5.world.cloudsReady)'); await v.sleep(2500);
     check('clouds draw', clouds, JSON.stringify(await v.eval('SITE5.world && SITE5.world.loads')));
-    const best = JSON.parse(await v.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * h);
+    const best = JSON.parse(await inFrame(v, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * h);
       g.readPixels(w >> 1, 0, 1, h, g.RGBA, g.UNSIGNED_BYTE, px); let b = [0, 0, 0];
-      for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > b[0] + b[1] + b[2]) b = [px[i], px[i + 1], px[i + 2]]; r(JSON.stringify(b)); }))`));
+      for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > b[0] + b[1] + b[2]) b = [px[i], px[i + 1], px[i + 2]]; r(JSON.stringify(b)); `, '["no frame"]'));
     check('the sky is lit at dusk, warm in the west', best[0] > 60 && best[0] > best[2], JSON.stringify(best));
     check('the loading readout goes once the world is in', await v.eval('document.getElementById("loading").hidden'));
     await v.goto('../site5/index.html?seed=7&traffic=0', 300); await ready(v);
@@ -464,15 +472,15 @@ async function ready(p) {
     // the monitor meters its picture like a camera: deep in the twilight (the default start, sun -6.7 deg) it opens
     // up instead of showing black
     await wait('SITE5.world.exposure > 30', 30); await v.sleep(6000);   // it adapts over a few seconds, as an eye does
-    const dim = await v.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
-      g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let s = 0, n = 0; for (let i = 0; i < px.length; i += 4 * 97) { s += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255; n++; } r(s / n); }))`);
+    const dim = await inFrame(v, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
+      g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let s = 0, n = 0; for (let i = 0; i < px.length; i += 4 * 97) { s += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255; n++; } r(s / n); `, NaN);
     check('deep twilight is visible, not black: the monitor opens up', dim > 0.05, (dim * 100).toFixed(1) + '% mean, exposure ' + (await v.eval('SITE5.world.exposure')).toFixed(0));
     await v.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(v);
     await v.sleep(2500);
     await v.mouse('mousePressed', 720, 760, 1); for (let y = 760; y >= 300; y -= 20) await v.mouse('mouseMoved', 720, y, 1);
     await v.sleep(1500);
-    const warm = await v.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
-      g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); }))`);
+    const warm = await inFrame(v, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
+      g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
     await v.mouse('mouseReleased', 720, 300);
     check('a moonless night still shows the cities', warm > 0.002, (warm * 100).toFixed(2) + '% warm');
     check('light and clouds: no JS errors', v.errors.length === 0, v.errors.join(' | '));
@@ -486,8 +494,60 @@ async function ready(p) {
     z.close();
   }
 
+  // ---- the 3D Earth ----
+  if (want('3d')) {
+    const KEY = require('fs').existsSync(require('path').join(__dirname, '../js/keys.js'));
+    const skip = n => console.log('SKIP ' + n + ' (no key)');
+    const t = await launch({ width: 1280, height: 720 });
+    if (KEY) {
+      await t.goto('../site5/index.html?seed=7', 300); await ready(t);
+      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
+      check('the 3D Earth streams in', await t.eval('SITE5.world.tiles.on && SITE5.world.tiles.loaded > 20 && !SITE5.world.tiles.failed'), JSON.stringify(await t.eval('SITE5.world.tiles')));
+      await t.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await t.sleep(3000);
+      check('after a resize the tiles keep loading, no errors', (await t.eval('SITE5.world.tiles.loaded')) > 20 && t.errors.length === 0, t.errors.join(' | '));
+      await t.send('Emulation.clearDeviceMetricsOverride', {});
+      // the terrain: Mont Blanc stands, the suit can't fly into it, and the cities glow on the tiles at night
+      await t.goto('../site5/index.html?seed=7&lat=45.8326&lon=6.8652&alt=8&hdg=0&time=2026-10-08T11:00:00Z', 300); await ready(t);
+      for (let i = 0; i < 120 && !((await t.eval('SITE5.world.heightAt(45.8326, 6.8652)')) > 3500); i++) await t.sleep(250);
+      const mb = await t.eval('SITE5.world.heightAt(45.8326, 6.8652)');
+      check('it\'s 3D: Mont Blanc stands over 3500 m', mb > 3500, String(mb));
+      await t.goto('../site5/index.html?seed=7&lat=45.8326&lon=6.8652&alt=1&hdg=0&throttle=0&time=2026-10-08T11:00:00Z', 300); await ready(t); await t.sleep(6000);
+      const alt = await t.eval('SITE5.pose.alt'), ground = await t.eval('SITE5.world.heightAt(SITE5.pose.geo[0], SITE5.pose.geo[1])');
+      check('the suit stays above the mountains (floor = terrain + 0.3 km)', ground === null || alt >= ground / 1000 + 0.29, alt.toFixed(2) + ' km over ' + ground);
+      await t.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&alt=10&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
+      await t.mouse('mousePressed', 640, 700, 1); for (let y = 700; y >= 250; y -= 20) await t.mouse('mouseMoved', 640, y, 1); await t.sleep(2500);
+      const warm = await inFrame(t, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
+        g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
+      await t.mouse('mouseReleased', 640, 250);
+      check('the cities glow on the 3D Earth at night', warm > 0.2, (warm * 100).toFixed(2) + '% warm');
+      await t.goto('../site5/index.html?seed=7', 300); await ready(t); await t.sleep(4000);
+      check("Google's attribution shows with the tiles", /google/i.test(await t.eval('document.getElementById("attrib").textContent')), await t.eval('document.getElementById("attrib").textContent'));
+      // (ion's required credits: both logos, the Google one once, the ion one inside its link, and only the links take the mouse)
+      check("the Google and Cesium ion logos show, linked and sized", await t.eval('(() => { const q = s => document.querySelectorAll("#attrib " + s); const g = q("img[alt=Google]"), c = q("a[href=\\"https://cesium.com\\"] img[alt=\\"Cesium ion\\"]"); return g.length === 1 && c.length === 1 && q("a[href=\\"https://cesium.com/pricing/\\"]").length === 1 && g[0].height === 14 && getComputedStyle(document.getElementById("attrib")).pointerEvents === "none" && getComputedStyle(c[0].parentNode).pointerEvents === "auto"; })()'), await t.eval('document.getElementById("attrib").innerHTML.length'));
+      await t.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await t.sleep(800);
+      check('the full credit fits a 375 px phone', await t.eval('(() => { const a = document.getElementById("attrib").getBoundingClientRect(); return a.width > 0 && a.left >= 0 && a.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; })()'));
+      await t.send('Emulation.clearDeviceMetricsOverride', {});
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(t);
+      await t.sleep(3000); const mem0 = await t.eval('SITE5.world.renderer.info.memory.textures');
+      await t.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 }); await t.sleep(30000);
+      await t.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+      check('a long fast flight: frames hold, no errors', (await t.eval('SITE5.frameMs')) < 12 && t.errors.length === 0, (await t.eval('SITE5.frameMs')).toFixed(1) + 'ms ' + t.errors.join(' | '));
+      // (the tiles' GPU memory is freed as they leave: the texture count at the end of the flight stays under 3x the start's, or an absolute 1500)
+      const mem1 = await t.eval('SITE5.world.renderer.info.memory.textures');
+      check('a long fast flight: GPU textures stay bounded', mem1 < Math.max(3 * mem0, 1500), mem0 + ' -> ' + mem1);
+      await t.goto('../site5/index.html?seed=7&tilestoken=bad', 300); await ready(t); await t.sleep(4000);
+      check('a bad key says so and the flat Earth flies on', (await t.eval('document.getElementById("loading").textContent')).includes("THE 3D EARTH COULDN'T LOAD") && await t.eval('SITE5.world.tiles.failed && SITE5.frames > 30'));
+    } else ['the 3D Earth streams in', 'after a resize the tiles keep loading, no errors', 'it\'s 3D: Mont Blanc stands over 3500 m',
+      'the suit stays above the mountains (floor = terrain + 0.3 km)', 'the cities glow on the 3D Earth at night',
+      "Google's attribution shows with the tiles", 'the Google and Cesium ion logos show, linked and sized', 'the full credit fits a 375 px phone', 'a long fast flight: frames hold, no errors', 'a long fast flight: GPU textures stay bounded', 'a bad key says so and the flat Earth flies on'].forEach(skip);
+    await t.goto('../site5/index.html?seed=7&tiles=0', 300); await ready(t); await t.sleep(1500);
+    check('?tiles=0: the flat Earth, no tiles, no errors', await t.eval('SITE5.world.tiles.on === false && SITE5.world.heightAt(46, 8) === null') && t.errors.length === 0, t.errors.join(' | '));
+    t.close();
+  }
+
   // ---- the monitor capture ----
-  {
+  if (want('capture')) {
     const p = await launch({ width: 1440, height: 900 });
     await p.goto(PAGE, 300); await ready(p);
     const n0 = await p.eval('SITE5.env ? SITE5.env.n : -1'); await p.sleep(2000);
@@ -508,17 +568,18 @@ async function ready(p) {
   }
 
   // ---- the seat's light ----
-  {
+  if (want('seatlight')) {
     const p = await launch({ width: 1440, height: 900 });
     await p.goto(PAGE, 300); await ready(p); for (let i = 0; i < 80 && !(await p.eval('SITE5.seat.ready')); i++) await p.sleep(250);
     check('the seat comes from seat.glb', await p.eval('SITE5.seat.source === "glb" && SITE5.parts.seatAO === true'));
     // the seat's own pixels (alpha > 0), read in a frame: mean luminance overall, in the left and right thirds, mean r and b
-    const seatStats = k => k.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.seatGL, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
+    const seatStats = k => inFrame(k, ` const g = SITE5.seatGL, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
       g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); const s = { n: 0, lum: 0, r: 0, b: 0, nl: 0, l: 0, nr: 0, rr: 0 };
       for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) { const i = 4 * (y * w + x), a = px[i + 3]; if (a < 250) continue;
         const L = (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255; s.n++; s.lum += L; s.r += px[i] / 255; s.b += px[i + 2] / 255;
         if (x < w / 3) { s.nl++; s.l += L } else if (x > 2 * w / 3) { s.nr++; s.rr += L } }
-      r({ n: s.n, lum: s.lum / s.n, r: s.r / s.n, b: s.b / s.n, left: s.l / s.nl, right: s.rr / s.nr }); }))`);
+      r({ n: s.n, lum: s.lum / s.n, r: s.r / s.n, b: s.b / s.n, left: s.l / s.nl, right: s.rr / s.nr }); `, { n: 0 })
+      .then(st => { for (const f of ['lum', 'r', 'b', 'left', 'right']) if (typeof st[f] !== 'number') st[f] = NaN; return st; });   // (no seat pixels: NaN, so the checks FAIL)
     const lookDown = async k => { await k.mouse('mousePressed', 700, 650, 1); for (let j = 1; j <= 8; j++) await k.mouse('mouseMoved', 700, 650 - 40 * j, 1); await k.mouse('mouseReleased', 700, 330); await k.sleep(1500); };
     const at = async (q) => { await p.goto('../site5/index.html?seed=7&alt=18&' + q, 300); await ready(p); await lookDown(p); return seatStats(p); };
     check('the seat is on Three.js', await p.eval('SITE5.seat && SITE5.seat.ready === true && SITE5.seat.source === "glb"'));
@@ -551,7 +612,7 @@ async function ready(p) {
   }
 
   // reduced motion: no auto flight, no sway
-  {
+  if (want('reduce')) {
     const r = await launch({ width: 1440, height: 810, reduce: true });   // 16:9, as the reference frame
     await r.goto(PAGE, 300); await ready(r);
     const h0 = await pose(r, 's.heading'), e0 = await pose(r, 'JSON.stringify(s.eye)');
@@ -582,7 +643,7 @@ async function ready(p) {
   }
 
   // phones
-  {
+  if (want('phone')) {
     const m = await launch({ width: 375, height: 812 });
     await m.goto(PAGE, 300); await ready(m);
     check('phone: no h-overflow', await m.eval('document.documentElement.scrollWidth <= innerWidth'));
@@ -592,6 +653,8 @@ async function ready(p) {
     await m.mouse('mousePressed', 187, 650, 1); for (let k = 1; k <= 8; k++) await m.mouse('mouseMoved', 187, 650 - 40 * k, 1); await m.mouse('mouseReleased', 187, 330);
     await m.sleep(200);
     check('phone: looking down shows the rails and grips', await m.eval('SITE5.parts.seat.grip > 4 && SITE5.parts.seat.rail > 4'), JSON.stringify(await m.eval('SITE5.parts.seat')));
+    // (a long credit is put in first, so an empty element can't pass: the tiles' own credit needs a key)
+    check('phone: the attribution fits', await m.eval('(() => { const e = document.getElementById("attrib"); e.textContent = "Google; Data SIO, NOAA, U.S. Navy, NGA, GEBCO; IBCAO; Landsat / Copernicus · Airbus"; const a = e.getBoundingClientRect(); return a.width > 0 && a.right <= innerWidth && a.width < innerWidth; })()'));
     m.close();
   }
   srv.close();

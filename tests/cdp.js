@@ -15,7 +15,10 @@ async function launch({ width = 1440, height = 900, reduce = false } = {}) {
   const port = 9300 + Math.floor(Math.random() * 600);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bunnys-'));
   const proc = spawn(chromePath(), ['--headless=new', '--no-sandbox', '--hide-scrollbars', '--allow-file-access-from-files',
-    '--remote-debugging-port=' + port, '--user-data-dir=' + dir, 'about:blank'], { stdio: 'ignore' });
+    '--remote-debugging-port=' + port,
+    // (no back/forward cache: it kept every page a test had left alive, WebGL contexts, 3D tiles and all, until the GPU
+    // lost its contexts and the page hung after a few navigations)
+    '--disable-features=BackForwardCache', '--user-data-dir=' + dir, 'about:blank'], { stdio: 'ignore' });
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   let list; for (let i = 0; i < 60 && !list; i++) { try { list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch { await sleep(200); } }
   const ws = new WebSocket(list.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise(r => ws.onopen = r);

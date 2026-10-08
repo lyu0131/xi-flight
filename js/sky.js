@@ -13,7 +13,8 @@
    ~400 000 times dimmer), the exposure falls to night levels and the city lights (NASA's Black Marble, emissive
    on the ground) and the stars (the Yale bright-star catalogue) are kept at their apparent brightness. Volumetric
    clouds (Takram), lit by the same light, cast their shadows and sit in the air.
-   SITE5.world = { ready, cloudsReady, light, exposure, loads, camera, renderer, srcTan }; SITE5.gl is its WebGL
+   SITE5.world = { ready, cloudsReady, light, exposure, loads, camera, renderer, srcTan, tiles, heightAt } (tiles and
+   heightAt: the 3D Earth, earth3d.js); SITE5.gl is its WebGL
    context; SITE5.warp(x, y) is the warp in JS (screen px -> picture uv, or null); SITE5.horizonDip(altKm).
    It also captures the monitor for the seat's light (see capture(), at the end): SITE5.env, SITE5.envFreeze,
    SITE5.envClouds; SITE5.loaded(k) is the loading readout's tick. */
@@ -23,6 +24,7 @@ import { AerialPerspectiveEffect, PrecomputedTexturesGenerator, getSunDirectionE
   SunDirectionalLight, SkyLightProbe, StarsGeometry, StarsMaterial, DEFAULT_STARS_DATA_URL } from '@takram/three-atmosphere'
 import { CloudsEffect, CLOUD_SHAPE_TEXTURE_SIZE, CLOUD_SHAPE_DETAIL_TEXTURE_SIZE } from '@takram/three-clouds'
 import { ArrayBufferLoader, DataTextureLoader, Ellipsoid, Geodetic, parseUint8Array, STBNLoader, DEFAULT_STBN_URL } from '@takram/three-geospatial'
+import { makeEarth3D } from './earth3d.js'
 
 const S = window.SITE5, m = S.m, D = Math.PI / 180
 const canvas = document.getElementById('world')
@@ -57,7 +59,9 @@ const scene = new THREE.Scene()
 // air (Takram's sun light and sky light probe), NASA's land and sea colour on it and its city lights glowing
 const earthGeo = new THREE.SphereGeometry(1, 720, 360); earthGeo.rotateX(Math.PI / 2)
 const earthMat = new THREE.MeshStandardMaterial({ color: 0x24303c, roughness: 0.92, metalness: 0, emissive: 0x000000 })
-const earth = new THREE.Mesh(earthGeo, earthMat); earth.scale.set(6378137, 6378137, 6356752.314245); scene.add(earth)
+// (1 km below the WGS84 surface: under the 3D tiles it fills their gaps while they stream in, and with no tiles it
+// is the whole Earth. Coarse distant tiles are flat chords that sag up to ~400 m under the curve, so it sits well below)
+const earth = new THREE.Mesh(earthGeo, earthMat); earth.scale.set(6378137 - 1000, 6378137 - 1000, 6356752.314245 - 1000); scene.add(earth)
 const tex = (url, srgb, k, use) => new THREE.TextureLoader().load(url, t => {
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); use(t); loaded(k)
 }, undefined, () => loaded(k, "THE EARTH'S MAPS COULDN'T LOAD"))
@@ -65,6 +69,14 @@ tex('assets/earth/world.topo.200407.3x5400x2700.jpg', true, 'land', t => { earth
 tex('assets/earth/BlackMarble_2016_3km.jpg', true, 'cities', t => { earthMat.emissiveMap = t; earthMat.emissive.set(0xffd9a8); earthMat.needsUpdate = true })
 const sunLight = new SunDirectionalLight({ distance: 300 }), skyLight = new SkyLightProbe()
 scene.add(sunLight, sunLight.target, skyLight)
+// the 3D Earth (earth3d.js): Google's photoreal tiles, when there's a key (js/keys.js) and no ?tiles=0.
+// ?tilestoken=bad (a test hook) puts in a key that ion refuses
+const TOKEN = qp.get('tilestoken') === 'bad' ? 'bad' : window.SITE5_KEYS && window.SITE5_KEYS.cesiumIon
+const earth3d = TOKEN && qp.get('tiles') !== '0'
+  ? makeEarth3D({ scene, camera, renderer, token: TOKEN, onFail: () => loaded('tiles', "THE 3D EARTH COULDN'T LOAD · FLAT EARTH SHOWN") })
+  : null
+world.tiles = earth3d ? earth3d.state : { on: false, loaded: 0, failed: false }
+world.heightAt = earth3d ? earth3d.heightAt : () => null
 // the stars: points at infinity, turned with the Earth
 const starsMat = new StarsMaterial({ background: true }); starsMat.pointSize = 1.6
 let stars = null
@@ -183,7 +195,7 @@ const METER = 0.1, EXPO_MAX = 300
 S.renderers.push(function (pose, Wd, Hd) {
   if (pose.t > checkAt) { checkAt = pose.t + 2; if (S.frameMs > 21 && scale > 0.6) scale = Math.max(0.6, scale - 0.15) }
   const w = Math.max(1, Math.round(Wd * scale)), h = Math.max(1, Math.round(Hd * scale))
-  if (w !== bw || h !== bh) { bw = w; bh = h; composer.setSize(w, h, false) }
+  if (w !== bw || h !== bh) { bw = w; bh = h; composer.setSize(w, h, false); earth3d && earth3d.resize() }
   const tx = S.cam.tx, ty = S.cam.ty, sx = tx * K, sy = ty * K
   world.srcTan = [sx, sy]
   camera.fov = 2 * Math.atan(sy) / D; camera.aspect = sx / sy; camera.updateProjectionMatrix()
@@ -211,10 +223,12 @@ S.renderers.push(function (pose, Wd, Hd) {
   ap.moonDirection && ap.moonDirection.copy(moon)
   sunLight.target.position.copy(P); sunLight.update(); skyLight.position.copy(P); skyLight.update()
   earthMat.emissiveIntensity = CITY / exposure; starsMat.intensity = STAR / exposure
+  if (earth3d) earth3d.setNight(earthMat.emissiveMap, CITY / exposure)   // (the same lights on the tiles)
   if (stars) { getECIToECEFRotationMatrix(date, eci); stars.setRotationFromMatrix(eci) }
   const U_ = warp.uniforms
   U_.get('uEye').value.set(pose.eye[0], pose.eye[1], pose.eye[2]); U_.get('uEyeM').value.fromArray(mat(pose.eyeQ))
   U_.get('uTan').value.set(tx, ty); U_.get('uSrc').value.set(sx, sy)
+  if (earth3d) earth3d.update()
   composer.render()
   if (atmo && !world.ready) world.ready = true
   if (capComposer && atmo) capture(pose)

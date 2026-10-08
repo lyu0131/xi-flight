@@ -28,6 +28,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--night)
   background: none; border: 0; padding: 8px 4px; color: #AFC0EC; font: 10px/1 Michroma, 'B612 Mono', monospace; letter-spacing: .18em;
   opacity: .75; cursor: pointer; }
 @media (max-width: 699px) { #hint .fine { display: none; } #hint .touch { display: inline; } #mode { max-width: calc(100vw - 32px); white-space: normal; text-align: left; line-height: 1.5; } }
+/* the tiles' credit (Google's terms): bottom right, quiet, wraps on a phone, never in the way */
+#attrib { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); z-index: 3; margin: 0;
+  max-width: min(46ch, calc(100vw - 32px)); text-align: right; font: 9px/1.5 'B612 Mono', monospace; letter-spacing: .06em; color: #E4EBFA; opacity: .8; text-shadow: 0 0 3px #05080F, 0 0 6px #05080F; pointer-events: none; }
+#attrib:empty { display: none; }
+#attrib img { height: 14px; max-width: 100%; vertical-align: middle; }
+#attrib a { color: inherit; pointer-events: auto; }   /* (only the links take the mouse; the rest never steals the stick) */
 #mode.nudge { opacity: 1; color: #FFA3DC; }
 #mode:hover, #mode:focus-visible { opacity: 1; color: #FFA3DC; outline: 1px solid rgba(255, 163, 220, .5); outline-offset: 2px; }
 @media (hover: none) { #hint .fine { display: none; } #hint .touch { display: inline; } }

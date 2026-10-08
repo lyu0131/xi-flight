@@ -58,6 +58,23 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
 - **The Earth**: the WGS84 ellipsoid at real scale, NASA's land and sea colour and Black Marble city lights as emission (both in
   `assets/earth/`; if they can't load the readout says THE EARTH'S MAPS COULDN'T LOAD), lit through the air by the sun or the moon
   (Takram's sun light and sky light probe). Stars from the Yale bright-star catalogue, turned with the Earth.
+- **The 3D Earth** (`js/earth3d.js`, spec `docs/2026-10-08-photoreal-earth-design.md`): Google's Photorealistic 3D Tiles,
+  streamed through Cesium ion (asset 2275207) by `3d-tiles-renderer`, in ECEF metres (the scene's own frame, so the tile group
+  needs no transform). Only the main camera drives the level of detail (`errorTarget` 16). Each tile's material is a lit
+  `MeshStandardMaterial` (photo as `map`, normals computed where a tile has none), so Takram's sun and sky light reach it
+  and the monitor capture and seat light work over it; at night the Black Marble city lights glow on it through a shared
+  shader patch (`setNight`). The flat Earth above stays as the fallback, **1000 m below** the WGS84 surface (coarse far tiles
+  sag up to ~400 m under it): it fills gaps while tiles stream in and is the whole Earth with no tiles.
+  - **The key**: `js/keys.js` (`window.SITE5_KEYS = { cesiumIon }`) is git-ignored and loaded as an optional classic script;
+    without it, or with an exhausted quota or no network, the flat Earth flies and (on an auth or root failure) the readout
+    says THE 3D EARTH COULDN'T LOAD. Never print, log or commit the key. Publishing `keys.js` waits for the token's Allowed
+    URLs to be restricted in the Cesium ion dashboard (the owner has confirmed they are).
+  - **`?tiles=0`** turns the tiles off (flat Earth, `world.tiles.on === false`); `?tilestoken=bad` is a test hook that
+    puts in a key ion refuses.
+  - **The terrain floor** (`js/ball.js`): twice a second the model asks `SITE5.world.heightAt(lat, lon)` (a ray down the
+    ellipsoid normal into the loaded tiles) and keeps the suit at least 0.3 km above the ground (`ALT_LO` where nothing is loaded).
+  - **Attribution** (`#attrib`, bottom right, the HUD's quiet text): `tiles.getAttributions()` joined with ` · `, refreshed
+    at most once a second, empty with the tiles off; `pointer-events: none`, wraps within the width at 375 px.
 - **Clouds**: Takram's volumetric clouds (their tileable weather; NASA's global cover is a stretch goal), lit by the
   same light, shadows on the ground, composited into the aerial perspective (the sky and the air between).
 - **The light**: the real sun (twilight glow included) until twilight has ended (-10 deg); after that, with the moon
@@ -73,7 +90,7 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
 - **Loading**: `#loading` counts the nine loads in; if the module or a library can't load, it says THE WORLD
   COULDN'T LOAD and the cockpit runs on. `SITE5.world` = { ready, cloudsReady, light, exposure, loads, camera,
   srcTan }; `SITE5.warp(x, y)` is the warp in JS; `SITE5.horizonDip(alt)`.
-- Not yet (later phases): streamed terrain and 500 m imagery (Phase 2), the cockpit relit by this world (Phase 3),
+- Not yet (later phases): a sharper night-lights map (500 m), the cockpit relit by this world (Phase 3),
   the aircraft as 3D models (Phase 4; until then only their HUD marks).
 
 ## The HUD (`js/hud.js`)
@@ -235,7 +252,7 @@ since the site is http-only) come with them.
   fails says so; the monitor capture (six 64² faces, day brighter than night); the seat's light (from seat.glb, noon
   brighter than night, its lit side follows the sun, warm at a sunset, a synthetic right-hand monitor lights the
   right-facing walls, dim but never black before a capture, a missing seat says so and the rings still draw); frame
-  time; every look; reduced motion holds still; a 375px phone fits. Its `ready()` waits for the world and the seat.
+  time (and a 30 s fast flight over the tiles); every look; reduced motion holds still; a 375px phone fits (the attribution too). The 3D block uses the real key and skips with a note without `js/keys.js`; `ONLY=3d,phone node site5/tests/cockpit.test.js` runs chosen blocks (the names in the `want('...')` wrappers). The harness launches Chrome with BackForwardCache off (old pages kept their WebGL alive and hung later loads). Its `ready()` waits for the world and the seat.
   One timing check ("MANUAL: steering at the enemy... locks within 3s") is a known flake.
 - `node site5/tests/traffic.test.js` (plain Node, instant): the traffic sim -- same seed same sky, 6 to 9 aircraft
   within 70 km, they leave and are replaced, heights by type, callsigns, contrails, `?near`.

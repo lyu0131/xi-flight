@@ -19,7 +19,9 @@
   "@takram/three-atmosphere":"https://esm.sh/@takram/three-atmosphere@0.19.1?external=three,postprocessing,@takram/three-geospatial",
   "@takram/three-atmosphere/shaders":"https://esm.sh/@takram/three-atmosphere@0.19.1/shaders?external=three,postprocessing,@takram/three-geospatial",
   "@takram/three-atmosphere/shaders/bruneton":"https://esm.sh/@takram/three-atmosphere@0.19.1/shaders/bruneton?external=three,postprocessing,@takram/three-geospatial",
-  "@takram/three-clouds":"https://esm.sh/@takram/three-clouds@0.7.6?external=three,postprocessing,@takram/three-geospatial,@takram/three-atmosphere"
+  "@takram/three-clouds":"https://esm.sh/@takram/three-clouds@0.7.6?external=three,postprocessing,@takram/three-geospatial,@takram/three-atmosphere",
+  "3d-tiles-renderer":"https://esm.sh/3d-tiles-renderer@0.5.3?external=three",
+  "3d-tiles-renderer/plugins":"https://esm.sh/3d-tiles-renderer@0.5.3/plugins?external=three"
 }}</script>
 </head>
 <body>
@@ -30,9 +32,12 @@
   <canvas id="seat" aria-hidden="true"></canvas>
   <p id="hint" aria-hidden="true"><span class="fine">MOUSE STEERS · W/S THROTTLE · SHIFT BOOST · RIGHT-DRAG LOOKS · M MODE</span><span class="touch">DRAG TO LOOK</span></p>
   <p id="loading" aria-live="polite">LOADING THE EARTH · 0%</p>
+  <p id="attrib"></p>
   <button id="mode" type="button">MODE: FREE</button>
   <p class="nogl-note">This browser can't draw the panoramic monitor (no WebGL2).</p>
 </main>
+<!-- the Cesium ion key for the 3D Earth (git-ignored; without it the flat Earth shows) -->
+<script src="js/keys.js"></script>
 <script src="js/ball.js" defer></script>
 <script src="js/traffic.js" defer></script>
 <script src="js/traffic-data.js" defer></script>

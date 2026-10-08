@@ -68,7 +68,7 @@
   // frame round the start, for the traffic.
   var RE = S.RE = 6371, KM_DEG = RE * D;   // km of ground per degree of latitude
   var lat = LAT0, lon = LON0;
-  var SEED = qs('seed', 1), TRAFFIC = qs('traffic', 1), ALT_LO = 1, ALT_HI = 100, ALT0 = 18, tr = null;   // near space by default (owner: 'almost in space but not really'); the edge of space is the ceiling
+  var SEED = qs('seed', 1), TRAFFIC = qs('traffic', 1), ALT_LO = 1, ALT_HI = 100, ALT0 = 18, tr = null, floor = ALT_LO, floorT = -1e9;   // near space by default (owner: 'almost in space but not really'); the edge of space is the ceiling
   // speed: the throttle (0..1) sets it between SPD_LO and SPD_HI km/s; a boost adds BOOST while held; the actual
   // speed follows on a lag. At real scale the range runs from Mach 1.5 to near orbital: 0.5-8 km/s, cruise 2
   // (throttle 0.2), boost +4. ?throttle= sets the start.
@@ -216,15 +216,18 @@
     yaw.v = clamp(yaw.v, -110, 110); pitch.v = clamp(pitch.v, -80, 80); pitch.x = clamp(pitch.x, -75, 75);
     spring(bank, reduce ? 0 : clamp(yaw.v * 0.5, -60, 60), 3.2, 0.7, dt);
     suitQ = euler(yaw.x, pitch.x, bank.x);
+    // the floor: 0.3 km over the 3D Earth's terrain where it's loaded (sampled every 0.5 s, here and 0.5 s ahead), never under ALT_LO
+    if (now - floorT > 500 && S.world && S.world.heightAt) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
+      var g = h === null ? g2 : g2 === null ? h : Math.max(h, g2); floor = g === null ? ALT_LO : Math.max(ALT_LO, g / 1000 + 0.3); }
     // flying forward, in km: the flight path is the nose; at the floor or the ceiling the climb is taken out
     if (!reduce) {
       var f = dir(yaw.x, pitch.x);
       pos[0] += f[0] * speed * dt; pos[1] += f[1] * speed * dt; pos[2] += f[2] * speed * dt;
       lat = clamp(lat + f[2] * speed * dt / KM_DEG, -89.9, 89.9);
       lon += f[0] * speed * dt / (KM_DEG * Math.cos(lat * D)); lon = ((lon + 540) % 360) - 180;
-      if ((pos[1] >= ALT_HI && pitch.x > 0) || (pos[1] <= ALT_LO && pitch.x < 0)) { pitch.x *= Math.max(0, 1 - dt * 6); pitch.v = Math.min(0, pitch.v * Math.sign(pitch.x || 1)) * Math.sign(pitch.x || 1); }
-      pos[1] = clamp(pos[1], ALT_LO, ALT_HI);
+      if ((pos[1] >= ALT_HI && pitch.x > 0) || (pos[1] <= floor && pitch.x < 0)) { pitch.x *= Math.max(0, 1 - dt * 6); pitch.v = Math.min(0, pitch.v * Math.sign(pitch.x || 1)) * Math.sign(pitch.x || 1); }
     }
+    pos[1] = clamp(pos[1], floor, ALT_HI);   // (still under reduced motion: a start inside a mountain is lifted out)
 
     // the seat, hung in the ball: thrown outward in a turn, pressed down in a pull, lagging the roll
     if (!reduce) {
