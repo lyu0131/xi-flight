@@ -1,0 +1,5 @@
+js/keys.js
+tools/tex-src/
+tools/earth-src/
+*.blend1
+__pycache__/

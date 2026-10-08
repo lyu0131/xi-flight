@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ball cockpit, test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=B612+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/cockpit.css">
+<!-- the world's libraries (sky.js), pinned: Three.js, postprocessing and Takram's geospatial packages -->
+<script type="importmap">{"imports":{
+  "three":"https://esm.sh/three@0.181.0",
+  "three/":"https://esm.sh/three@0.181.0/",
+  "three/addons/":"https://esm.sh/three@0.181.0/examples/jsm/",
+  "postprocessing":"https://esm.sh/postprocessing@6.38.0?external=three",
+  "@takram/three-geospatial":"https://esm.sh/@takram/three-geospatial@0.9.1?external=three",
+  "@takram/three-geospatial/shaders":"https://esm.sh/@takram/three-geospatial@0.9.1/shaders?external=three",
+  "@takram/three-atmosphere":"https://esm.sh/@takram/three-atmosphere@0.19.1?external=three,postprocessing,@takram/three-geospatial",
+  "@takram/three-atmosphere/shaders":"https://esm.sh/@takram/three-atmosphere@0.19.1/shaders?external=three,postprocessing,@takram/three-geospatial",
+  "@takram/three-atmosphere/shaders/bruneton":"https://esm.sh/@takram/three-atmosphere@0.19.1/shaders/bruneton?external=three,postprocessing,@takram/three-geospatial",
+  "@takram/three-clouds":"https://esm.sh/@takram/three-clouds@0.7.6?external=three,postprocessing,@takram/three-geospatial,@takram/three-atmosphere"
+}}</script>
+</head>
+<body>
+<main id="cockpit" aria-label="Panoramic cockpit, a test">
+  <h1 class="sr-only">Panoramic monitor cockpit test: a ball display inside the suit</h1>
+  <canvas id="world" aria-hidden="true"></canvas>
+  <canvas id="hud" aria-hidden="true"></canvas>
+  <canvas id="seat" aria-hidden="true"></canvas>
+  <p id="hint" aria-hidden="true"><span class="fine">MOUSE STEERS · W/S THROTTLE · SHIFT BOOST · RIGHT-DRAG LOOKS · M MODE</span><span class="touch">DRAG TO LOOK</span></p>
+  <p id="loading" aria-live="polite">LOADING THE EARTH · 0%</p>
+  <button id="mode" type="button">MODE: FREE</button>
+  <p class="nogl-note">This browser can't draw the panoramic monitor (no WebGL2).</p>
+</main>
+<script src="js/ball.js" defer></script>
+<script src="js/traffic.js" defer></script>
+<script src="js/traffic-data.js" defer></script>
+<script src="js/ring-data.js" defer></script>
+<!-- the world; if it (or a library it needs) can't load, the cockpit still runs and the readout says so -->
+<script src="js/sky.js" type="module" onerror="var n = document.getElementById('loading'); if (n) { n.hidden = false; n.textContent = 'THE WORLD COULDN\'T LOAD · CHECK THE CONNECTION'; }"></script>
+<script src="js/hud.js" defer></script>
+<!-- the seat, on Three.js too, lit by the monitor's picture (sky.js captures it); if it (or a library it needs) can't
+     load, the readout says so -->
+<script src="js/seat.js" type="module" onerror="window.SITE5 && SITE5.loaded && SITE5.loaded('seat', 'THE SEAT COULDN\'T LOAD')"></script>
+</body>
+</html>

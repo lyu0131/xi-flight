@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lock motion: demos</title>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&display=swap" rel="stylesheet">
+<style>
+  :root { --line: #AFC0EC; --pink: #FFA3DC; }
+  body { margin: 0; background: #05080F; color: var(--line); font: 11px/1.4 Michroma, sans-serif; letter-spacing: .12em; }
+  h1 { font-size: 12px; font-weight: 400; margin: 18px 20px 4px; }
+  p.note { margin: 0 20px 14px; opacity: .6; letter-spacing: .06em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; padding: 0 20px 24px; }
+  figure { margin: 0; }
+  canvas { display: block; width: 100%; aspect-ratio: 4 / 3; border: 1px solid #1d2a3d; }
+  figcaption { margin-top: 6px; }
+  figcaption b { color: var(--pink); font-weight: 400; margin-right: 6px; }
+  figcaption span { display: block; opacity: .55; letter-spacing: .04em; margin-top: 2px; }
+</style>
+</head>
+<body>
+<h1>LOCK: MAKING IT MOVE</h1>
+<p class="note">Each loops the same run: a contact drifts in, gets acquired, is held while it weaves, then jinks out and the lock breaks. Same sight, colours and scale as site5. Add #t=1.3 to the URL to freeze every panel at that time.</p>
+<div class="grid" id="grid"></div>
+<script>
+(function () {
+  'use strict';
+  var V = [
+    ['0', 'NOW', 'shrinks and jitters in, blinks, then sits dead still on the nose'],
+    ['A', 'SPRING', 'flares open on acquire, closes in on a spring, overshoots into the lock with a clunk; breathes while held'],
+    ['B', 'TRACK', 'the frame stays on the nose; the brackets and V slew onto the target and follow it as it weaves'],
+    ['C', 'IRIS', 'the brackets swing in like an iris while acquiring; on lock the edge bars slide into place and crawl slowly while held'],
+    ['D', 'PING + BREAK', 'a faint outline echo pings out on lock and again every second; when the lock breaks the brackets fly apart'],
+    ['E', 'A + B + D (RECOMMENDED)', 'spring close-in, tracking brackets, ping while held, fly-apart on break']
+  ];
+  var CYCLE = 4.4, ACQ0 = 0.75, LOCK = 1.25, BREAK = 3.4, DT = 1 / 240;
+  var C = { line: '#AFC0EC', pink: '#FFA3DC', bar: '#FF4F8B', salmon: '#EBA89C' };
+  var bg = new Image(); bg.src = 'bg-clean.png';
+  var grid = document.getElementById('grid'), panels = [];
+  V.forEach(function (v, i) {
+    var fig = document.createElement('figure'), cv = document.createElement('canvas'), cap = document.createElement('figcaption');
+    cap.innerHTML = '<b>' + v[0] + '</b>' + v[1] + '<span>' + v[2] + '</span>';
+    fig.appendChild(cv); fig.appendChild(cap); grid.appendChild(fig);
+    panels.push({ id: v[0], cv: cv, ctx: cv.getContext('2d') });
+  });
+  function smooth(a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+  function rnd(n) { var x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x) - 0.5; }   // seeded, so #t freezes repeat
+  function spring(o, to, w, z) { o.v += (-w * w * (o.x - to) - 2 * z * w * o.v) * DT; o.x += o.v * DT; }
+
+  // the contact, in sight units (y down) from the nose: drifts in, weaves while held, jinks out
+  function target(t) {
+    var a = [380, -190], b = [70, -30];
+    if (t < ACQ0) { var s = smooth(0, ACQ0, t); return [a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s]; }
+    var u = t - ACQ0, w = [b[0] + 60 * Math.sin(2.2 * u) - 40 * smooth(0, 1.5, u), b[1] + 34 * Math.sin(3.4 * u)];
+    if (t < BREAK) return w;
+    var s2 = smooth(BREAK, BREAK + 0.45, t); return [w[0] + (-480 - w[0]) * s2, w[1] + (160 - w[1]) * s2];
+  }
+
+  // the site5 sight in its own units (y down); shift slides the edge bars along their edges
+  var Tt = -200, A = 210, HW = 237, LEN = Math.hypot(HW, A - Tt);
+  function parts(shift) {
+    var out = { face: [[-HW, Tt], [HW, Tt], [0, A]], bars: [], brk: [], v: [[-48, A - 196], [0, A - 116], [48, A - 196]] };
+    [-1, 1].forEach(function (sd) {
+      var ux = -sd * HW / LEN, uy = (A - Tt) / LEN, nx = sd * (A - Tt) / LEN, ny = HW / LEN;
+      var at = function (t, off) { return [sd * HW + ux * LEN * t + nx * off, Tt + uy * LEN * t + ny * off]; };
+      out.bars.push([at(-0.04 + shift, 30), at(0.3 + shift, 30)], [at(0.72 - shift, 30), at(1.03 - shift, 30)]);
+      var ix = sd * HW * 0.62, iy = Tt + 62;
+      out.brk.push([[ix - sd * 78, iy], [ix, iy], [ix + ux * 84, iy + uy * 84]]);
+    });
+    return out;
+  }
+
+  // draw a polyline under a transform { s, r (rad), dx, dy } (sight units), with the tier-1 halo when lit
+  function line(ctx, pts, color, alpha, w, X, halo) {
+    if (alpha <= 0.002) return;
+    var c = Math.cos(X.r || 0), sn = Math.sin(X.r || 0);
+    var map = function (q) { var x = q[0] * X.s, y = q[1] * X.s; return [X.cx + (x * c - y * sn + X.dx) * X.k, X.cy + (x * sn + y * c + X.dy) * X.k]; };
+    var go = function (a, lw) {
+      ctx.globalAlpha = a; ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath();
+      pts.forEach(function (q, i) { var m = map(q); if (i) ctx.lineTo(m[0], m[1]); else ctx.moveTo(m[0], m[1]); }); ctx.stroke();
+    };
+    if (halo) go(alpha * 0.16, w + Math.min(w * 2, 4));
+    go(alpha, w);
+  }
+  function wMark(ctx, x, y, r, color, label, lc) {
+    var Wp = [[-1, -1], [-0.5, 1], [0, -0.45], [0.5, 1], [1, -1]];
+    ctx.globalAlpha = 0.9; ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
+    Wp.forEach(function (q, i) { var px = x + q[0] * r, py = y + q[1] * r; if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }); ctx.stroke();
+    ctx.globalAlpha = 0.55; ctx.lineWidth = 1; ctx.beginPath();
+    Wp.forEach(function (q, i) { var px = x + q[0] * r * 0.8, py = y + q[1] * r * 0.8 + r * 0.1; if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }); ctx.stroke();
+    ctx.globalAlpha = 0.9; ctx.fillStyle = lc; ctx.font = '9px Michroma, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(label, x + r * 0.9, y + r * 1.5);
+  }
+
+  // Run a variant from the start of the cycle to t (fixed steps, so a frozen #t shows the same frame every time)
+  // and return how to draw it.
+  function simulate(id, t) {
+    var has = function (f) { return id === f || (id === 'E' && 'ABD'.indexOf(f) >= 0); };
+    var sc = { x: 1, v: 0 }, cx = { x: 0, v: 0 }, cy = { x: 0, v: 0 }, rot = { x: 0, v: 0 }, sl = { x: 0, v: 0 };
+    var prev = 'idle';
+    for (var s = 0; s <= t; s += DT) {
+      var st = s < ACQ0 ? 'idle' : s < LOCK ? 'acq' : s < BREAK ? 'lock' : 'lost', g = st === 'acq' ? (s - ACQ0) / (LOCK - ACQ0) : 0;
+      if (has('A')) {
+        if (st === 'acq' && prev === 'idle') sc.v += 9;      // flare open as the lock starts
+        if (st === 'lock' && prev === 'acq') sc.v -= 3.5;    // the clunk into the lock
+        var to = st === 'acq' ? 1.5 - 0.45 * g : st === 'lock' ? 1 + 0.018 * Math.sin((s - LOCK) * 7.5) : 1;
+        spring(sc, to, 15, 0.42);
+      }
+      if (has('B')) {
+        var tg = st === 'acq' || st === 'lock' ? target(s) : [0, 0], w = st === 'acq' ? 8 : 16;
+        spring(cx, tg[0], w, 0.8); spring(cy, tg[1], w, 0.8);
+      }
+      if (has('C')) {
+        if (st === 'acq' && prev === 'idle') rot.x = 1.1;
+        spring(rot, st === 'acq' ? 1.1 * (1 - g) : 0, st === 'acq' ? 9 : 18, 0.35);
+        if (st === 'lock' && prev === 'acq') sl.x = 0.14;
+        spring(sl, st === 'lock' ? 0.02 * Math.sin((s - LOCK) * 3) : 0, 14, 0.5);
+      }
+      prev = st;
+    }
+    var stage = t < ACQ0 ? 'idle' : t < LOCK ? 'acq' : t < BREAK ? 'lock' : 'lost';
+    var gg = stage === 'acq' ? (t - ACQ0) / (LOCK - ACQ0) : stage === 'lock' ? 1 : 0, since = t - LOCK;
+    var o = { stage: stage, alpha: 0.15, halo: false, scale: 1, brkScale: 1, cue: [0, 0], rot: 0, shift: 0, jit: 0, pings: [], fly: 0, vPink: false };
+    // the current behaviour, which every variant starts from
+    if (stage === 'acq') { o.alpha = 0.15 + 0.55 * gg; o.scale = 1 + 0.5 * (1 - gg * gg * (3 - 2 * gg)); o.jit = 0.006 * (1 - gg) + 0.0012; }
+    if (stage === 'lock') { o.alpha = (since >= 0.06 && since < 0.12) || (since >= 0.18 && since < 0.24) ? 0 : 1; o.halo = true; o.vPink = true; }
+    if (has('A')) { o.scale = sc.x; o.jit *= 0.4; if (stage === 'lock') o.alpha = since < 0.24 ? o.alpha : 0.9 + 0.1 * Math.sin(since * 7.5); }
+    if (has('B')) { o.cue = [cx.x, cy.x]; o.brkScale = o.scale; o.scale = has('A') ? 1 + (sc.x - 1) * 0.25 : 1; }
+    if (has('C')) { o.rot = rot.x; o.shift = sl.x; }
+    if (has('D')) {
+      if (stage === 'lock') for (var k = 0; k <= Math.floor(since / 1.0); k++) { var a = since - k * 1.0; if (a < 0.5) o.pings.push(a / 0.5); }
+      if (stage === 'lost') o.fly = Math.min(1, (t - BREAK) / 0.3);
+    }
+    return o;
+  }
+
+  function draw(p, t) {
+    var cv = p.cv, ctx = p.ctx, dpr = Math.min(2, devicePixelRatio || 1);
+    var w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = 1;
+    if (bg.complete && bg.naturalWidth) ctx.drawImage(bg, 0, 0, w, h); else { ctx.fillStyle = '#0B1220'; ctx.fillRect(0, 0, w, h); }
+    var X0 = { cx: w / 2, cy: h * 0.46, k: w / 1050 }, o = simulate(p.id, t), locked = o.stage === 'lock';
+    var P = parts(o.shift), tg = target(t);
+    wMark(ctx, X0.cx + tg[0] * X0.k, X0.cy + tg[1] * X0.k, w * 0.022, locked ? C.bar : C.line, locked ? 'LOCK' : 'UNKNOWN', locked ? C.bar : C.salmon);
+    var j = function (n) { return o.jit ? rnd(t * 997 + n) * o.jit * 2400 : 0; };   // jitter, in sight units
+    var frame = { cx: X0.cx, cy: X0.cy, k: X0.k, s: o.scale, r: 0, dx: 0, dy: 0 };
+    var a = o.alpha;
+    if (a > 0) {
+      // the frame: face, its outline, the edge bars
+      ctx.globalAlpha = 0.07 * a; ctx.fillStyle = 'rgb(170,186,245)'; ctx.beginPath();
+      P.face.forEach(function (q, i) { var x = X0.cx + q[0] * o.scale * X0.k, y = X0.cy + q[1] * o.scale * X0.k; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); ctx.fill();
+      line(ctx, P.face.concat([P.face[0]]), C.line, 0.34 * a, 1, frame, false);
+      P.bars.forEach(function (b, i) { line(ctx, b, C.line, 0.7 * a, 3.6, Object.assign({}, frame, { dx: j(i), dy: j(i + 9) }), o.halo); });
+      // the brackets and the V: the part that can chase the target
+      P.brk.forEach(function (b, i) {
+        var sd = i ? 1 : -1, X = { cx: X0.cx, cy: X0.cy, k: X0.k, s: o.brkScale, r: o.rot * sd, dx: o.cue[0] + j(i + 20), dy: o.cue[1] + j(i + 30) };
+        line(ctx, b, C.line, 0.64 * a, 2.4, X, o.halo);
+        // the lost lock: a copy flies apart over the idle sight
+        if (o.fly && o.fly < 1) line(ctx, b, C.line, 0.7 * (1 - o.fly), 2.4, Object.assign({}, X, { s: 1 + o.fly * 0.8, dx: sd * o.fly * 90, dy: -o.fly * 40 }), true);
+      });
+      line(ctx, P.v, o.vPink ? C.bar : C.line, (o.vPink ? 0.9 : 0.64) * a, 2.4, { cx: X0.cx, cy: X0.cy, k: X0.k, s: o.brkScale, r: 0, dx: o.cue[0] + j(40), dy: o.cue[1] + j(41) }, o.halo);
+      if (locked) { ctx.globalAlpha = 0.95 * a; ctx.fillStyle = C.pink; ctx.font = '9px Michroma, sans-serif'; ctx.textAlign = 'right'; ctx.fillText('AUTO', X0.cx + (HW + 6) * o.scale * X0.k, X0.cy + (Tt - 14) * o.scale * X0.k); }
+    }
+    o.pings.forEach(function (q) { line(ctx, P.face.concat([P.face[0]]), C.line, 0.45 * (1 - q) * (1 - q), 1.2, Object.assign({}, frame, { s: o.scale * (1 + 0.4 * q) }), false); });
+    ctx.globalAlpha = 0.5; ctx.fillStyle = C.line; ctx.font = '9px Michroma, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText({ idle: 'IDLE', acq: 'ACQUIRING', lock: 'LOCKED', lost: 'LOCK LOST' }[o.stage], 10, h - 10);
+  }
+
+  var frozen = (/#t=([\d.]+)/.exec(location.hash) || [])[1];
+  function frame(now) {
+    var t = frozen != null ? +frozen : (now / 1000) % CYCLE;
+    panels.forEach(function (p) { draw(p, t); });
+    if (frozen == null) requestAnimationFrame(frame);
+  }
+  bg.onload = function () { if (frozen != null) frame(0); };
+  addEventListener('hashchange', function () { frozen = (/#t=([\d.]+)/.exec(location.hash) || [])[1]; requestAnimationFrame(frame); });
+  requestAnimationFrame(frame);
+  window.DEMO = { draw: function (t) { panels.forEach(function (p) { draw(p, t); }); }, simulate: simulate };
+})();
+</script>
+</body>
+</html>

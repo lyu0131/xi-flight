@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sight appear: demos</title>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&display=swap" rel="stylesheet">
+<style>
+  :root { --line: #AFC0EC; --pink: #FFA3DC; }
+  body { margin: 0; background: #05080F; color: var(--line); font: 11px/1.4 Michroma, sans-serif; letter-spacing: .12em; }
+  h1 { font-size: 12px; font-weight: 400; margin: 18px 20px 4px; }
+  p.note { margin: 0 20px 14px; opacity: .6; letter-spacing: .06em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; padding: 0 20px 24px; }
+  figure { margin: 0; }
+  canvas { display: block; width: 100%; aspect-ratio: 4 / 3; border: 1px solid #1d2a3d; }
+  figcaption { margin-top: 6px; }
+  figcaption b { color: var(--pink); font-weight: 400; margin-right: 6px; }
+  figcaption span { display: block; opacity: .55; letter-spacing: .04em; margin-top: 2px; }
+</style>
+</head>
+<body>
+<h1>TRIANGLE SIGHT: HOW IT APPEARS</h1>
+<p class="note">Each loops the same cycle: idle, acquiring (0.5s), locked (1.9s), the lock breaks. Same triangle, colours and scale as site5. Add #t=1.0 to the URL to freeze every panel at that time in the cycle.</p>
+<div class="grid" id="grid"></div>
+<script>
+(function () {
+  'use strict';
+  var V = [
+    ['0', 'NOW', 'fade in over 0.15s on lock'],
+    ['1', 'SNAP + BLINK', 'on lock it snaps on full and blinks twice, then holds'],
+    ['2', 'BRACKETS SLEW IN', 'while acquiring, the brackets and V step in onto the target; on lock the rest snaps on'],
+    ['3', 'STROKE DRAW', 'on lock the outline traces itself on, then the bars and brackets'],
+    ['4', 'ACQUIRE, THEN LOCK', 'acquiring: dim flickering brackets only; on lock the full sight snaps on, steady'],
+    ['5', 'SCAN-LINE REVEAL', 'on lock a bright line sweeps down and leaves the sight drawn behind it'],
+    ['6', '4 + 1 (RECOMMENDED)', 'acquiring as 4; on lock the full sight snaps on and blinks twice']
+  ];
+  var CYCLE = 3.2, ACQ0 = 0.2, LOCK = 0.7, BREAK = 2.6;
+  var C = { line: '#AFC0EC', pink: '#FFA3DC', bar: '#FF4F8B', salmon: '#EBA89C' };
+  var bg = new Image(); bg.src = 'bg.png';
+  var grid = document.getElementById('grid'), panels = [];
+  V.forEach(function (v) {
+    var fig = document.createElement('figure'), cv = document.createElement('canvas'), cap = document.createElement('figcaption');
+    cap.innerHTML = '<b>' + v[0] + '</b>' + v[1] + '<span>' + v[2] + '</span>';
+    fig.appendChild(cv); fig.appendChild(cap); grid.appendChild(fig);
+    panels.push({ id: +v[0], cv: cv, ctx: cv.getContext('2d') });
+  });
+  function smooth(a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+
+  // the site5 triangle, in its own units (y down), scaled by k about (cx, cy)
+  var Tt = -200, A = 210, HW = 237, LEN = Math.hypot(HW, A - Tt);
+  function parts() {
+    var out = { face: [[-HW, Tt], [HW, Tt], [0, A]], bars: [], brk: [], v: [[-48, A - 196], [0, A - 116], [48, A - 196]] };
+    [-1, 1].forEach(function (sd) {
+      var ux = -sd * HW / LEN, uy = (A - Tt) / LEN, nx = sd * (A - Tt) / LEN, ny = HW / LEN;
+      var at = function (t, off) { return [sd * HW + ux * LEN * t + nx * off, Tt + uy * LEN * t + ny * off]; };
+      out.bars.push([at(-0.04, 30), at(0.3, 30)], [at(0.72, 30), at(1.03, 30)]);
+      var ix = sd * HW * 0.62, iy = Tt + 62;
+      out.brk.push([[ix - sd * 78, iy], [ix, iy], [ix + ux * 84, iy + uy * 84]]);
+    });
+    return out;
+  }
+  var P = parts();
+
+  function line(ctx, pts, color, alpha, w, k, cx, cy, s, dx, dy) {
+    s = s || 1; dx = dx || 0; dy = dy || 0;
+    ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath();
+    pts.forEach(function (q, i) { var x = cx + (q[0] * s + dx) * k, y = cy + (q[1] * s + dy) * k; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+  // a stroke with the site5 tier-1 halo: a faint wider stroke under a sharp core
+  function lit(ctx, pts, color, alpha, w, k, cx, cy, s, dx, dy) {
+    line(ctx, pts, color, alpha * 0.16, w + Math.min(w * 2, 4), k, cx, cy, s, dx, dy);
+    line(ctx, pts, color, alpha, w, k, cx, cy, s, dx, dy);
+  }
+  // partial polyline: the first frac of its length
+  function partial(pts, frac) {
+    var segs = [], tot = 0;
+    for (var i = 1; i < pts.length; i++) { var l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); segs.push(l); tot += l; }
+    var want = tot * frac, out = [pts[0]];
+    for (i = 1; i < pts.length; i++) {
+      if (want >= segs[i - 1]) { out.push(pts[i]); want -= segs[i - 1]; }
+      else { var t = want / segs[i - 1]; out.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t]); break; }
+    }
+    return out;
+  }
+  function wMark(ctx, x, y, r, color, label, lc) {
+    var Wp = [[-1, -1], [-0.5, 1], [0, -0.45], [0.5, 1], [1, -1]];
+    ctx.globalAlpha = 0.9; ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
+    Wp.forEach(function (q, i) { var px = x + q[0] * r, py = y + q[1] * r; if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }); ctx.stroke();
+    ctx.globalAlpha = 0.55; ctx.lineWidth = 1; ctx.beginPath();
+    Wp.forEach(function (q, i) { var px = x + q[0] * r * 0.8, py = y + q[1] * r * 0.8 + r * 0.1; if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }); ctx.stroke();
+    ctx.globalAlpha = 0.9; ctx.fillStyle = lc; ctx.font = '9px Michroma, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(label, x + r * 0.9, y + r * 1.5);
+  }
+
+  // what each part of the sight shows at cycle time t: { face, bars, brk, v, mode } alphas, plus tweaks
+  function state(id, t) {
+    var acq = t >= ACQ0 && t < LOCK, locked = t >= LOCK && t < BREAK, since = t - LOCK;
+    var g = acq ? (t - ACQ0) / (LOCK - ACQ0) : 0;
+    var S = { face: 0, bars: 0, brk: 0, v: 0, mode: 0, scale: 1, jitter: 0, draw: 1, scan: null, vPink: locked };
+    function all(a) { S.face = S.bars = S.brk = S.v = S.mode = a; }
+    var blink = function (x) { return x < 0.06 || (x >= 0.12 && x < 0.18) || x >= 0.24 ? 1 : 0; };
+    if (id === 0) { if (locked) all(smooth(0, 0.15, since)); }
+    if (id === 1) { if (locked) all(blink(since)); }
+    if (id === 2) {
+      if (acq) { S.brk = S.v = 0.75; S.scale = 1 + 0.9 * (1 - Math.floor(g * 6) / 6); }   // stepped, like a tracking servo
+      if (locked) all(1);
+    }
+    if (id === 3) { if (locked) { all(1); S.draw = Math.min(1, since / 0.12); if (since < 0.12) S.bars = S.brk = S.v = S.mode = 0; } }
+    if (id === 4 || id === 6) {
+      if (acq) { S.brk = 0.45 + 0.15 * Math.sin(t * 90); S.jitter = 1; }
+      if (locked) { all(id === 6 ? blink(since) : 1); }
+    }
+    if (id === 5) { if (locked) { all(1); if (since < 0.18) S.scan = since / 0.18; } }
+    return S;
+  }
+
+  function draw(p, t) {
+    var cv = p.cv, ctx = p.ctx, dpr = Math.min(2, devicePixelRatio || 1);
+    var w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = 1;
+    if (bg.complete && bg.naturalWidth) ctx.drawImage(bg, 0, 0, w, h); else { ctx.fillStyle = '#0B1220'; ctx.fillRect(0, 0, w, h); }
+    var cx = w / 2, cy = h * 0.46, k = w / 1050;
+    var S = state(p.id, t), locked = t >= LOCK && t < BREAK;
+    // the target: on the nose, pink with LOCK once locked
+    wMark(ctx, cx, cy - 4, w * 0.026, locked ? C.bar : C.line, locked ? 'LOCK' : 'UNKNOWN', locked ? C.bar : C.salmon);
+    ctx.save();
+    if (S.scan !== null) { ctx.beginPath(); ctx.rect(0, 0, w, cy + (-230 + 460 * S.scan) * k); ctx.clip(); }
+    var j = S.jitter ? function () { return (Math.random() - 0.5) * 6; } : function () { return 0; };
+    if (S.face) {
+      ctx.globalAlpha = 0.07 * S.face; ctx.fillStyle = 'rgb(170,186,245)'; ctx.beginPath();
+      P.face.forEach(function (q, i) { var x = cx + q[0] * k, y = cy + q[1] * k; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); ctx.fill();
+      line(ctx, partial(P.face.concat([P.face[0]]), S.draw), C.line, 0.34 * S.face, 1, k, cx, cy);
+    }
+    if (S.bars) P.bars.forEach(function (b) { lit(ctx, b, C.line, 0.7 * S.bars, 3.6, k, cx, cy); });
+    if (S.brk) P.brk.forEach(function (b) { var dx = j(), dy = j(); lit(ctx, b, C.line, 0.64 * S.brk, 2.4, k, cx, cy, S.scale, dx, dy); });
+    if (S.v) lit(ctx, P.v, S.vPink ? C.bar : C.line, (S.vPink ? 0.9 : 0.64) * S.v, 2.4, k, cx, cy, S.scale);
+    if (S.mode) { ctx.globalAlpha = 0.95 * S.mode; ctx.fillStyle = C.pink; ctx.font = '9px Michroma, sans-serif'; ctx.textAlign = 'right'; ctx.fillText('AUTO', cx + (HW + 6) * k, cy + (Tt - 14) * k); }
+    ctx.restore();
+    if (S.scan !== null) {
+      var sy = cy + (-230 + 460 * S.scan) * k;
+      ctx.globalAlpha = 0.9 * (1 - S.scan * 0.6); ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(cx - 290 * k, sy); ctx.lineTo(cx + 290 * k, sy); ctx.stroke();
+    }
+    // the cycle readout
+    ctx.globalAlpha = 0.5; ctx.fillStyle = C.line; ctx.font = '9px Michroma, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(t < ACQ0 ? 'IDLE' : t < LOCK ? 'ACQUIRING' : t < BREAK ? 'LOCKED' : 'LOCK LOST', 10, h - 10);
+  }
+
+  var frozen = (/#t=([\d.]+)/.exec(location.hash) || [])[1];
+  function frame(now) {
+    var t = frozen != null ? +frozen : (now / 1000) % CYCLE;
+    panels.forEach(function (p) { draw(p, t); });
+    if (frozen == null) requestAnimationFrame(frame);
+  }
+  bg.onload = function () { if (frozen != null) frame(0); };
+  addEventListener('hashchange', function () { frozen = (/#t=([\d.]+)/.exec(location.hash) || [])[1]; requestAnimationFrame(frame); });
+  requestAnimationFrame(frame);
+  window.DEMO = { draw: function (t) { panels.forEach(function (p) { draw(p, t); }); } };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cluster ideas: demos</title>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&display=swap" rel="stylesheet">
+<style>
+  :root { --line: #AFC0EC; --pink: #FFA3DC; --bar: #FF4F8B; }
+  body { margin: 0; background: #05080F; color: var(--line); font: 11px/1.4 Michroma, sans-serif; letter-spacing: .12em; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 16px 40px; }
+  h1 { font-size: 12px; font-weight: 400; margin: 18px 0 4px; }
+  p.note { margin: 0 0 18px; opacity: .6; letter-spacing: .06em; }
+  figure { margin: 0 0 26px; }
+  canvas { display: block; width: 100%; aspect-ratio: 72 / 19; border: 1px solid #1d2a3d; background: #0B1220; }
+  .bar { height: 2px; background: #1d2a3d; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--pink); }
+  figcaption { display: flex; gap: 14px; align-items: flex-start; margin-top: 8px; }
+  figcaption div { flex: 1; }
+  figcaption b { color: var(--pink); font-weight: 400; margin-right: 6px; }
+  figcaption span { display: block; opacity: .55; letter-spacing: .04em; margin-top: 2px; }
+  button { font: inherit; letter-spacing: .14em; color: var(--line); background: rgba(120, 140, 200, .1); border: 1px solid #3a4c6e;
+    padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+  button:hover, button:focus-visible { border-color: var(--pink); color: var(--pink); outline: none; }
+  button[aria-pressed="true"] { border-color: var(--bar); color: var(--bar); }
+</style>
+</head>
+<body>
+<main>
+<h1>LOWER CLUSTER</h1>
+<p class="note">Every panel starts as the cluster looks now. Press play on one to run the same 8 second flight through it:
+level, turn left, climb, dive and roll right, acquire, lock, then a jink right that breaks the lock. What the flight is
+doing shows bottom left. Same shapes and colours as site5, drawn flat.</p>
+<div id="list"></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var V = [
+    ['#', 'BUILT ON 9: RADAR AND PANELS FROM SITE4, IN SITE5\u2019S SHAPES'],
+    ['9', 'LIVE DASHES (YOUR PICK)', 'the dash rows scroll with the turn rate; the base for everything below', '9'],
+    ['B1', '9 + RADAR HEX', 'the left hex becomes the radar: a sweep arm at the site4 radar\u2019s speed with its fading trail, the view wedge, and a blip per contact (even off screen) that lights as the arm passes; the right hex becomes the thrust vector, a dot that swings with the turns', '9rv'],
+    ['B2', '9 + PANEL BARS', 'the pentagon plates hold three bar rows each, like site4\u2019s panels: thrust on the left (main and verniers, firing with the turns), reactor on the right (a row drops pink in the dive)', '9b'],
+    ['B3', '9 + TRACE', 'the lower dash row becomes site4\u2019s scrolling waveform trace, which spikes with every manoeuvre', '9s'],
+    ['B4', '9 + SYSTEM CELLS', 'the square grids blink on their own schedules like site4\u2019s combat-system cells', '9c'],
+    ['BR', 'B1 + B2 + B3 (RECOMMENDED)', 'radar, thrust vector, bars and trace, all on the shapes that are already there', '9rvbs'],
+    ['BA', 'ALL OF B1 TO B4', 'everything, cells included', '9rvbsc'],
+    ['#', 'THE EARLIER IDEAS'],
+    ['1', 'TURN TABS', 'the small arrow tabs light on the side the suit is turning, brighter the harder it turns', '1'],
+    ['2', 'ARROW PLATES', 'the big pentagon plates flash when left/right is pressed (or the autopilot turns), and hold lit while it is', '2'],
+    ['3', 'PITCH CHEVRONS', 'the up chevrons ripple upward in a climb; the top V ripples down in a dive', '3'],
+    ['4', 'CONTACT GRIDS', 'one square per contact, on the side it is on; the target blinks pink while acquiring, solid pink once locked', '4'],
+    ['5', 'GYRO HEXES', 'the inner hexagon and spokes counter-rotate with the roll, like an attitude gyro, and settle back level', '5'],
+    ['6', 'LOCK CASCADE', 'the small triangle pulses while acquiring; on lock a flash runs up the stack at the sight, and it stays pink', '6'],
+    ['7', 'RAIL PULSE', 'on lock a bright pulse runs in along the pink rail into both caps, then the salmon chevrons flash', '7'],
+    ['8', 'SHARED SWAY', 'the whole cluster lags the turns on a soft spring, like the big triangle', '8'],
+    ['R', '1 TO 6 (RECOMMENDED)', 'every shape gets a job, nothing added', '123456'],
+    ['A', 'EVERYTHING, 1 TO 9', 'all of it at once, to see where it tips into too busy', '123456789']
+  ];
+  var DUR = 8, DT = 1 / 240;
+  var C = { line: '#AFC0EC', tick: '#EEF3FA', pink: '#FFA3DC', bar: '#FF4F8B', barIn: '#FFC6E8', salmon: '#EBA89C', plate: 'rgba(120, 140, 200, .10)' };
+  var bg = new Image(); bg.src = 'bg-clean.png';
+
+  function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
+  function smooth(a, b, x) { var t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+  function bump(t, a, b, r) { return smooth(a, a + r, t) * (1 - smooth(b - r, b, t)); }
+
+  // ---- the flight: one script every panel plays ----
+  var ACQ0 = 4.9, LOCK = 5.4, LOST = 6.3;
+  function sig(t) {
+    var s = {};
+    s.yaw = -bump(t, 0.8, 2.4, 0.35) + bump(t, 5.9, 6.7, 0.2) * 1.2;          // turn rate, -1 left .. 1 right
+    s.pitch = bump(t, 2.6, 3.8, 0.3) - bump(t, 4.0, 4.8, 0.25);               // climb + / dive -
+    s.rollAng = -14 * bump(t, 0.8, 2.4, 0.35) + 28 * bump(t, 3.9, 5.2, 0.35) + 12 * bump(t, 5.9, 6.7, 0.2);   // bank, deg
+    s.input = t >= 0.8 && t < 2.3 ? -1 : t >= 5.9 && t < 6.6 ? 1 : 0;
+    s.stage = t >= ACQ0 && t < LOCK ? 'acq' : t >= LOCK && t < LOST ? 'lock' : 'idle';
+    s.g = s.stage === 'acq' ? (t - ACQ0) / (LOCK - ACQ0) : s.stage === 'lock' ? 1 : 0;
+    s.since = t - LOCK; s.sinceLost = t - LOST;
+    // contacts (x: deg off the nose); the turn left swings them right, the jink swings them left
+    var sw = 9 * smooth(0.8, 2.4, t) - 14 * smooth(5.9, 6.7, t);
+    s.contacts = [
+      { id: 'opp', x: 14 - 16 * smooth(2.4, 4.9, t) + sw * 0.3, on: true },
+      { id: 'ms1', x: -18 + sw, on: true },
+      { id: 'ms2', x: 21 + sw, on: t < 3.2 || t > 6.5 }
+    ];
+    s.label = t < 0.8 ? 'LEVEL' : t < 2.4 ? 'TURN LEFT (← HELD)' : t < 3.9 ? 'CLIMB' : t < ACQ0 ? 'DIVE + ROLL RIGHT' :
+      t < LOCK ? 'ACQUIRING' : t < 5.9 ? 'LOCKED' : t < LOST ? 'JINK RIGHT (→ HELD)' : t < 7 ? 'LOCK LOST' : 'LEVEL';
+    return s;
+  }
+  // the lagged values a spring needs (run from 0 so any t gives the same frame)
+  function lagged(t) {
+    var o = { x: 0, v: 0 }, p = { x: 0, v: 0 }, r = { x: 0, v: 0 }, phase = 0;
+    var spring = function (q, to, w, z) { q.v += (-w * w * (q.x - to) - 2 * z * w * q.v) * DT; q.x += q.v * DT; };
+    for (var s = 0; s <= t; s += DT) {
+      var g = sig(s);
+      spring(o, -g.yaw, 6, 0.45); spring(p, -g.pitch, 6, 0.45); spring(r, g.rollAng, 5, 0.55);
+      phase += g.yaw * DT * 6;
+    }
+    return { yaw: o.x, pitch: p.x, roll: r.x, phase: phase };
+  }
+
+  // ---- drawing, in degrees off the cluster's centre (x right, y up) ----
+  var ctx, X0, Y0, K;
+  function pt(q) { return [X0 + q[0] * K, Y0 - q[1] * K]; }
+  function poly(pts, closed) {
+    ctx.beginPath(); pts.forEach(function (q, i) { var m = pt(q); if (i) ctx.lineTo(m[0], m[1]); else ctx.moveTo(m[0], m[1]); });
+    if (closed) ctx.closePath();
+  }
+  // a stroke at the cluster's tier (dim), or lit: brighter with the tier-1 halo under a sharp core
+  function st(pts, color, alpha, w, closed, lit) {
+    lit = lit || 0;
+    var a = clamp(alpha * 0.7 + (1 - alpha * 0.7) * lit, 0, 1), lw = w * 0.85 * (1 + 0.2 * lit);
+    if (lit > 0.05) { ctx.globalAlpha = a * 0.16 * lit; ctx.strokeStyle = color; ctx.lineWidth = lw + Math.min(lw * 2, 4); poly(pts, closed); ctx.stroke(); }
+    ctx.globalAlpha = a; ctx.strokeStyle = color; ctx.lineWidth = lw; poly(pts, closed); ctx.stroke();
+  }
+  function fl(pts, color, alpha) { ctx.globalAlpha = alpha; ctx.fillStyle = color; poly(pts, true); ctx.fill(); }
+  function hex(u, v, r, rot) {
+    var q = []; for (var a = 0; a < 360; a += 60) { var c = Math.cos((a + rot) * Math.PI / 180), s = Math.sin((a + rot) * Math.PI / 180); q.push([u + c * r * 1.15, v + s * r]); }
+    return q;
+  }
+  var Z = function (d) { return d * 0.75; };   // the HUD's 0.75 size
+
+  function badge(u, v, s, rot, lit, bare) {
+    fl(hex(u, v, s, 0), C.plate, 1); st(hex(u, v, s, 0), C.line, 0.75, 1.3, true);
+    if (bare) return;
+    st(hex(u, v, s * 0.45, rot), C.line, 0.5, 1, true, lit);
+    for (var a = 90; a < 450; a += 120) {
+      var c = Math.cos((a + rot) * Math.PI / 180), sn = Math.sin((a + rot) * Math.PI / 180);
+      st([[u + c * s * 0.52, v + sn * s * 0.45], [u + c * s * 0.85, v + sn * s * 0.8]], C.line, 0.5, 1, false, lit);
+    }
+  }
+  function arrowPlate(u, v, s, sd, lit, slide, bars) {
+    var P = function (x, y) { return [u + sd * x * s, v + y * s]; };
+    var out = [P(-1, 0.75), P(0.35, 0.75), P(1, 0), P(0.35, -0.75), P(-1, -0.75)];
+    fl(out, C.plate, 1); if (lit) fl(out, C.line, 0.12 * lit);
+    st(out, C.line, 0.75, 1.3, true, lit);
+    st([P(-0.82, 0.55), P(0.25, 0.55), P(0.75, 0), P(0.25, -0.55), P(-0.82, -0.55)], C.line, 0.5, 1, true, lit * 0.6);
+    var d = slide || 0;
+    if (bars) st([P(0.58 + d, 0.26), P(0.36 + d, 0), P(0.58 + d, -0.26)], C.line, 0.85, 1.3, false, lit);   // shifted into the nose, clear of the bars
+    else st([P(0.1 + d, 0.34), P(-0.35 + d, 0), P(0.1 + d, -0.34)], C.line, 0.85, 1.5, false, lit);
+  }
+  function tabPlate(u, v, s, sd, lit, nudge) {
+    var P = function (x, y) { return [u + sd * x * s, v + y * s]; }, n = nudge || 0;
+    st([P(-0.4, 0.5), P(-1, 0.5), P(-1.2, 0), P(-1, -0.5), P(-0.4, -0.5)], C.line, 0.7, 1.2, false, lit);
+    st([P(0.4, 0.5), P(1, 0.5), P(1.2, 0), P(1, -0.5), P(0.4, -0.5)], C.line, 0.7, 1.2, false, lit);
+    st([P(-0.5 + n, 0), P(0.5 + n, 0)], C.line, 0.6, 1, false, lit); st([P(0.2 + n, 0.22), P(0.5 + n, 0), P(0.2 + n, -0.22)], C.line, 0.6, 1, false, lit);
+  }
+  function dotGrid(u, v, s, cells) {   // cells: 6 colours/alphas (3 cols x 2 rows), inner column first
+    var k = 0;
+    for (var i = 0; i < 3; i++) for (var j = 0; j < 2; j++) {
+      var x = u + (i - 1) * s * 2.3, y = v + (j - 0.5) * s * 2.3, c = cells ? cells[k++] : null;
+      fl([[x - s, y - s], [x + s, y - s], [x + s, y + s], [x - s, y + s]], c ? c[0] : C.line, (c ? c[1] : 0.4) * 0.7);
+    }
+  }
+  function dashRows(u, v, a, rows, gap, phase, lit) {
+    for (var r = 0; r < rows; r++) {
+      var ph = phase ? (r ? -phase : phase) : 0;
+      for (var i = 0; i < 13; i++) {
+        if ((i * 7 + r * 3) % 5 === 3) continue;
+        var x = -a + ((i * a * 0.16 + ph) % (a * 2.08) + a * 2.08) % (a * 2.08);
+        if (x > a) continue;
+        st([[u + x, v - r * gap], [u + Math.min(a + a * 0.11, x + a * 0.11), v - r * gap]], C.line, 0.55, 1, false, lit);
+      }
+    }
+  }
+
+  // B1: the radar in a hex. Heading-up, as site4's: the arm turns clockwise from the top once every 3.4s
+  function polar(u, v, R, a) { var r = a * Math.PI / 180; return [u + Math.sin(r) * R * 1.15, v + Math.cos(r) * R]; }
+  function wedge(u, v, R, a0, a1) { var q = [[u, v]]; for (var a = a0; a <= a1 + 0.01; a += 2.5) q.push(polar(u, v, R, a)); return q; }
+  function radarHex(u, v, s, t, sg) {
+    var R = s * 0.82, th = (t / 3.4) * 360;
+    fl(wedge(u, v, R, -40, 40), C.line, 0.07);                                   // what's in view
+    for (var i = 0; i < 6; i++) fl(wedge(u, v, R, th - (i + 1) * 10, th - i * 10), C.line, 0.16 * (1 - i / 6));   // the trail
+    st(hex(u, v, s * 0.45, 0), C.line, 0.35, 1, true);                            // a range ring
+    st([[u, v], polar(u, v, R, th)], C.line, 0.9, 1, false, 0.5);                 // the arm
+    sg.contacts.forEach(function (c) {
+      var b = c.x * 1.6, ago = (((th - b) % 360) + 360) % 360 / 360 * 3.4, a = 0.3 + 0.7 * Math.exp(-ago / 0.6);
+      var tg = c.id === 'opp' && sg.stage !== 'idle', q = polar(u, v, R * 0.64, b), h = 0.17;
+      fl([[q[0] - h, q[1] - h], [q[0] + h, q[1] - h], [q[0] + h, q[1] + h], [q[0] - h, q[1] + h]], tg ? C.bar : C.line, a);
+    });
+    fl([[u, v + 0.3], [u + 0.2, v - 0.2], [u, v - 0.08], [u - 0.2, v - 0.2]], C.line, 0.8);   // own ship
+  }
+  // B1: the thrust vector in the other hex: a cross and a dot that swings with the (lagged) turns
+  function vectorHex(u, v, s, t, L) {
+    st(hex(u, v, s * 0.45, 0), C.line, 0.35, 1, true);
+    st([[u - s * 0.85, v], [u + s * 0.85, v]], C.line, 0.3, 1); st([[u, v - s * 0.75], [u, v + s * 0.75]], C.line, 0.3, 1);
+    var dx = clamp(-L.yaw * 0.9 + 0.12 * Math.sin(t * 1.7), -1, 1) * s * 0.62 * 1.15, dy = clamp(-L.pitch * 0.9 + 0.1 * Math.cos(t * 1.3), -1, 1) * s * 0.58;
+    st([[u, v], [u + dx, v + dy]], C.line, 0.7, 1.3, false, 0.4);
+    var r = 0.2; fl([[u + dx - r, v + dy], [u + dx, v + dy + r], [u + dx + r, v + dy], [u + dx, v + dy - r]], C.line, 0.95);
+  }
+  // B2: three bar rows inside an arrow plate (a track, and a fill that goes pink below 20%)
+  function plateBars(u, v, s, sd, vals) {
+    var P = function (x, y) { return [u + sd * x * s, v + y * s]; };
+    vals.forEach(function (val, i) {
+      var y = 0.3 - i * 0.3, x0 = -0.72, x1 = 0.18, xe = x0 + (x1 - x0) * clamp(val, 0.02, 1);
+      st([P(x0, y), P(x1, y)], C.line, 0.3, 1);
+      st([P(x0, y), P(xe, y)], val < 0.2 ? C.bar : C.line, 0.85, 2.2, false, val < 0.2 ? 0.6 : 0);
+    });
+  }
+  // B3: the waveform trace: newest on the right, 1.7s of history across, bigger while manoeuvring
+  function trace(u, v, a, gap, t) {
+    var pts = [];
+    for (var i = 0; i <= 48; i++) {
+      var x = -a + 2 * a * i / 48, tau = t - (a - x) / (2 * a) * 1.7, g = sig(Math.max(0, tau));
+      var amp = 0.3 + 0.9 * clamp(Math.abs(g.yaw) + Math.abs(g.pitch), 0, 1);
+      var n = Math.sin(tau * 7) * 0.3 + Math.sin(tau * 13.3) * 0.3 + Math.sin(tau * 29) * 0.22 + Math.sin(tau * 61) * 0.13;
+      pts.push([u + x, v + clamp(n * amp, -1, 1) * gap * 0.55]);
+    }
+    st(pts, C.line, 0.6, 1);
+  }
+
+  function draw(p, t) {
+    var cv = p.cv, dpr = Math.min(2, devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    ctx = p.ctx; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = 1;
+    if (bg.complete && bg.naturalWidth) { var sh = bg.naturalWidth * h / w; ctx.drawImage(bg, 0, bg.naturalHeight * 0.62, bg.naturalWidth, sh, 0, 0, w, h); }
+    else { ctx.fillStyle = '#0B1220'; ctx.fillRect(0, 0, w, h); }
+    ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
+    K = w / 72; X0 = w / 2; Y0 = h * 0.5;
+    var on = function (n) { return p.fx.indexOf(n) >= 0; }, s = sig(t), L = (on('5') || on('8') || on('9') || on('v')) ? lagged(t) : null;
+    var lockFlash = s.since >= 0 && s.since < 1.2 ? s.since : -1;
+
+    // the rail and its caps (not part of the cluster, so they don't sway): y +5 deg, caps at +-30
+    var RY = 5;
+    [-1, 1].forEach(function (sd) {
+      var x0 = sd * (30 + Z(1.4)), x1 = sd * 37;
+      st([[x0, RY + Z(1.2)], [x1, RY + Z(1.2)]], C.tick, 0.55, 1); st([[x0, RY - Z(1.6)], [x1, RY - Z(1.6)]], C.tick, 0.55, 1);
+      st([[x0, RY - Z(0.7)], [x1, RY - Z(0.7)]], C.barIn, 0.8, 1);
+      st([[x0, RY], [x1, RY]], C.bar, 1.3, 1.6, false, 0.6);
+      // the rail pulse: a bright run coming in to the cap
+      var capLit = 0, chevLit = 0;
+      if (on('7') && lockFlash >= 0) {
+        var q = lockFlash / 0.28;
+        if (q < 1) { var xp = x1 + (x0 - x1) * q; st([[xp + sd * 2.5, RY], [xp, RY]], C.barIn, 1.4, 2.6, false, 1); }
+        capLit = bump(lockFlash, 0.26, 0.6, 0.1); chevLit = bump(lockFlash, 0.36, 0.75, 0.1);
+      }
+      var cw = Z(2.6), ch = Z(3.4), cx = sd * 30;
+      var dia = [[cx - cw, RY], [cx, RY + ch], [cx + cw, RY], [cx, RY - ch]];
+      fl(dia, C.plate, 1); if (capLit) fl(dia, C.bar, 0.18 * capLit);
+      st(dia, capLit ? C.bar : C.line, 0.85 / 0.7 * 0.82, 1.3, true, capLit);
+      st([[cx - cw * 0.62, RY], [cx, RY + ch * 0.62], [cx + cw * 0.62, RY], [cx, RY - ch * 0.62]], C.line, 0.5, 1, true, capLit * 0.6);
+      st([[cx - sd * cw * 0.2, RY + ch * 0.3], [cx + sd * cw * 0.25, RY], [cx - sd * cw * 0.2, RY - ch * 0.3]], C.line, 0.9, 1.3, false, capLit);
+      var bx = sd * (30 - Z(4)), by = RY - Z(0.5);
+      st([[bx + sd * Z(0.9), by + Z(1.5)], [bx - sd * Z(0.6), by], [bx + sd * Z(0.9), by - Z(1.5)]], C.salmon, 0.9 / 0.7 * 0.82, 2, false, chevLit);
+    });
+
+    // the cluster (it sways as one, in 8)
+    ctx.save();
+    if (on('8')) { ctx.translate(X0, Y0); ctx.rotate(-L.roll * 0.012); ctx.translate(L.yaw * 1.1 * K, -L.pitch * 0.8 * K); ctx.translate(-X0, -Y0); }
+    var Q = function (x, el) { return [Z(x), Z(el + 26)]; };
+    // the pitch chevrons (3) and the lock cascade (6): lit amounts per piece, bottom to top
+    var litTri = 0, litSal = 0, litUp = 0, litDash = 0, litTop = 0;
+    if (on('3')) {
+      var cl = Math.max(0, s.pitch), dv = Math.max(0, -s.pitch), rip = function (k) { return 0.5 + 0.5 * Math.sin(t * 14 - k * 1.6); };
+      litSal = cl * rip(0); litUp = cl * rip(1);
+      litTop = dv * rip(0); litDash = dv * rip(1) * 0.6;
+    }
+    var pinkTri = false;
+    if (on('6')) {
+      if (s.stage === 'acq') litTri = Math.max(litTri, 0.35 + 0.35 * Math.sin(t * 30) * s.g + 0.3 * s.g);
+      if (s.stage === 'lock') pinkTri = true;
+      if (lockFlash >= 0) {
+        var fx = function (k) { return Math.exp(-Math.pow((lockFlash - k * 0.07) / 0.06, 2)); };
+        litTri = Math.max(litTri, fx(0)); litSal = Math.max(litSal, fx(1)); litUp = Math.max(litUp, fx(2)); litDash = Math.max(litDash, fx(3)); litTop = Math.max(litTop, fx(4));
+      }
+    }
+    var py = on('3') ? s.pitch * 0.35 : 0;   // the chevrons ride up a touch in a climb
+    st([Q(-1.4, -23.2), Q(0, -24.4), Q(1.4, -23.2)].map(function (q) { return [q[0], q[1] + py]; }), C.line, 0.85, 1.8, false, litTop);
+    dashRows(0, Z(0.4), Z(4.6), on('s') ? 1 : 2, Z(0.9), on('9') ? L.phase : 0, litDash);
+    if (on('s')) trace(0, Z(0.4) - Z(0.9), Z(4.6), Z(0.9), t);
+    st([Q(-1.4, -29), Q(0, -28), Q(1.4, -29)].map(function (q) { return [q[0], q[1] + py]; }), C.line, 0.85, 1.8, false, litUp);
+    st([Q(-1.6, -31.6), Q(0, -30.4), Q(1.6, -31.6)].map(function (q) { return [q[0], q[1] + py]; }), C.salmon, 0.85, 1.8, false, litSal);
+    var tri = [Q(-2.6, -35.6), Q(2.6, -35.6), Q(0, -32.8)], tc = pinkTri ? C.bar : C.salmon;
+    fl(tri, C.plate, 1); if (pinkTri) fl(tri, C.bar, 0.16);
+    st(tri, tc, 0.75, 1.3, true, pinkTri ? Math.max(litTri, 0.7) : litTri);
+    st([Q(-1.6, -35.1), Q(1.6, -35.1), Q(0, -33.5)], tc, 0.5, 1, true, pinkTri ? 0.5 : litTri * 0.6);
+
+    [-1, 1].forEach(function (sd) {
+      // 5: the gyro; 1: the turn tabs; 2: the arrow plates
+      if (on('r') && sd < 0) { badge(sd * Z(10.1), 0, Z(2.3), 0, 0, true); radarHex(sd * Z(10.1), 0, Z(2.3), t, s); }
+      else if (on('v') && sd > 0) { badge(sd * Z(10.1), 0, Z(2.3), 0, 0, true); vectorHex(sd * Z(10.1), 0, Z(2.3), t, L); }
+      else badge(sd * Z(10.1), 0, Z(2.3), on('5') ? -L.roll : 0, on('5') ? clamp(Math.abs(L.roll) / 20, 0, 0.7) : 0);
+      var press = on('2') && s.input === sd, held = press ? 1 : 0;
+      var since = press ? t - (sd < 0 ? 0.8 : 5.9) : 9, flash = press ? Math.max(0.75, 1 - since * 1.2) : 0;
+      arrowPlate(sd * Z(18), Z(0.7), Z(3.1), sd, flash, press ? -0.12 * ((t * 3) % 1) : 0, on('b'));
+      if (on('b')) plateBars(sd * Z(18), Z(0.7), Z(3.1), sd, sd < 0
+        ? [0.55 + 0.35 * Math.abs(s.pitch) + 0.04 * Math.sin(t * 2.1), 0.28 + 0.62 * Math.max(0, s.yaw) + 0.05 * Math.sin(t * 3.3), 0.28 + 0.62 * Math.max(0, -s.yaw) + 0.05 * Math.sin(t * 2.7)]
+        : [0.92 + 0.03 * Math.sin(t * 1.3), 0.64 + 0.09 * Math.sin(t * 0.9), 0.42 + 0.08 * Math.sin(t * 1.7) - 0.36 * Math.max(0, -s.pitch)]);
+      var turn = on('1') ? clamp(sd * s.yaw, 0, 1) : 0;
+      tabPlate(sd * Z(8), Z(3.4), Z(1.3), sd, turn, turn * 0.25);
+      tabPlate(sd * Z(8), -Z(3), Z(1.3), sd, turn, turn * 0.25);
+      // 4: the contact grids
+      var cells = null;
+      if (on('c')) {
+        cells = [];
+        for (var q = 0; q < 6; q++) cells.push(Math.sin(t * 3000 / (2300 + q * 480) + q + (sd > 0 ? 3 : 0)) > -0.55 ? [C.line, 0.9] : [C.line, 0.15]);
+      }
+      if (on('4')) {
+        cells = [];
+        var mine = s.contacts.filter(function (c) { return c.on && (sd < 0 ? c.x < 0 : c.x >= 0); });
+        for (var k = 0; k < 6; k++) {
+          var c = mine[k];
+          if (!c) cells.push([C.line, 0.18]);
+          else if (c.id === 'opp' && s.stage === 'acq') cells.push([C.bar, Math.sin(t * 40) > 0 ? 1 : 0.3]);
+          else if (c.id === 'opp' && s.stage === 'lock') cells.push([C.bar, 1]);
+          else cells.push([C.line, 0.95]);
+        }
+      }
+      dotGrid(sd * Z(24.3), -Z(1.3), Z(0.55), cells);
+    });
+    ctx.restore();
+
+    // the contacts, as a reference strip along the top edge
+    ctx.globalAlpha = 0.55; ctx.fillStyle = C.line; ctx.font = '8px Michroma, sans-serif'; ctx.textAlign = 'center';
+    s.contacts.forEach(function (c) {
+      if (!c.on) return;
+      var m = pt([c.x, 8.2]), tg = c.id === 'opp' && s.stage !== 'idle';
+      ctx.fillStyle = tg ? C.bar : C.line; ctx.globalAlpha = tg ? 0.95 : 0.55;
+      ctx.fillText(c.id === 'opp' ? 'W' : 'w', m[0], m[1]);
+    });
+    ctx.globalAlpha = 0.75; ctx.fillStyle = C.line; ctx.font = '9px Michroma, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(s.label, 10, h - 10);
+    ctx.textAlign = 'right'; ctx.globalAlpha = 0.45; ctx.fillText(t.toFixed(1) + 's', w - 10, h - 10);
+  }
+
+  // ---- the panels, each with its own play button ----
+  var list = document.getElementById('list'), panels = [];
+  V.forEach(function (v) {
+    if (v[0] === '#') { var hd = document.createElement('h1'); hd.textContent = v[1]; hd.style.margin = '30px 0 12px'; list.appendChild(hd); return; }
+    var fig = document.createElement('figure'), cv = document.createElement('canvas'), bar = document.createElement('div'), cap = document.createElement('figcaption');
+    bar.className = 'bar'; bar.innerHTML = '<i></i>';
+    cap.innerHTML = '<div><b>' + v[0] + '</b>' + v[1] + '<span>' + v[2] + '</span></div>';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.textContent = '▶ PLAY'; btn.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-label', 'Play ' + v[1]);
+    cap.appendChild(btn); fig.appendChild(cv); fig.appendChild(bar); fig.appendChild(cap); list.appendChild(fig);
+    var p = { id: v[0], fx: v[3], cv: cv, ctx: cv.getContext('2d'), start: null, t: 0, btn: btn, fill: bar.firstChild };
+    btn.addEventListener('click', function () {
+      if (p.start !== null) { p.start = null; p.t = 0; }   // stop
+      else p.start = performance.now();
+      sync(p); draw(p, p.t);
+    });
+    panels.push(p);
+  });
+  function sync(p) {
+    var playing = p.start !== null;
+    p.btn.textContent = playing ? '■ STOP' : (p.t > 0 ? '↻ REPLAY' : '▶ PLAY');
+    p.btn.setAttribute('aria-pressed', String(playing));
+    p.fill.style.width = (p.t / DUR * 100) + '%';
+  }
+  function frame(now) {
+    panels.forEach(function (p) {
+      if (p.start === null) return;
+      p.t = (now - p.start) / 1000;
+      if (p.t >= DUR) { p.t = DUR; p.start = null; }
+      draw(p, p.t); sync(p);
+    });
+    requestAnimationFrame(frame);
+  }
+  function drawAll(t) { panels.forEach(function (p) { if (t != null) p.t = t; draw(p, p.t); sync(p); }); }
+  bg.onload = function () { drawAll(); };
+  addEventListener('resize', function () { drawAll(); });
+  var frozen = (/#t=([\d.]+)/.exec(location.hash) || [])[1];   // #t=5.5 freezes every panel there (for checking)
+  drawAll(frozen != null ? +frozen : null);
+  requestAnimationFrame(frame);
+  window.DEMO = { draw: drawAll };
+})();
+</script>
+</body>
+</html>
