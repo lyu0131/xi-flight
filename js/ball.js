@@ -60,8 +60,9 @@
   // ?traffic=0 empties it
   var T = reduce ? 2 : 0;
   var qs = function (k, d) { var m = new RegExp('[?&]' + k + '=(-?[\\d.]+)').exec(location.search); return m ? +m[1] : d; };
-  // where on the real Earth the flight starts (?lat= ?lon=): over the Tyrrhenian Sea at night, Naples and Rome ahead
-  var LAT0 = qs('lat', 40.0), LON0 = qs('lon', 13.0);
+  // where on the real Earth the flight starts (?lat= ?lon=): over the hills east of Naples at dusk, heading west
+  // (?hdg=, below) with the city's lights and the sunset ahead (owner, 2026-10-08: "let me see the city")
+  var LAT0 = qs('lat', 40.92), LON0 = qs('lon', 14.95);
   // the real Earth, at real scale (the realism rebuild, 2026-10-08: CesiumJS draws it). Everything that needs its
   // size reads SITE5.RE. The suit's place on it (lat, lon) is integrated from its velocity; pos stays a flat km
   // frame round the start, for the traffic.
@@ -73,7 +74,7 @@
   // (throttle 0.2), boost +4. ?throttle= sets the start.
   var SPD_LO = 0.5, SPD_HI = 8, BOOST = 4, throttle = clamp(qs('throttle', 0.2), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
   var mouse = null, looking = false, DEAD = 0.08;   // the cursor (-1..1 from the centre, or null if not over the page)
-  var yaw = { x: qs('hdg', 262), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
+  var yaw = { x: qs('hdg', 258), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
   var seat = [{ x: 0, v: 0 }, { x: 0, v: 0 }, { x: 0, v: 0 }];   // offset in the ball, in ball radii
   var seatRoll = { x: 0, v: 0 }, seatPitch = { x: 0, v: 0 };
   var head = { yaw: 0, pitch: 0 }, lastDrag = -1e9, dragging = false;

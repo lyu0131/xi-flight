@@ -8,7 +8,14 @@ const serve = require('./serve');
 let srv = null;
 async function launch(o) {
   const p = await launchFile(o);
-  p.goto = async (path, wait = 1500) => { await p.send('Page.navigate', { url: srv.url(path.replace(/^\.\.\//, '')) }); await p.sleep(wait); };
+  // (the old page is marked first and the wait is for it to be gone: a fixed sleep let ready() pass on the old page
+  // when the new one was slow to commit)
+  p.goto = async (path, wait = 1500) => {
+    await p.eval('window.__oldPage = true');
+    await p.send('Page.navigate', { url: srv.url(path.replace(/^\.\.\//, '')) });
+    for (let i = 0; i < 100 && (await p.eval('window.__oldPage === true')) !== false; i++) await p.sleep(50);
+    await p.sleep(wait);
+  };
   return p;
 }
 const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0&hdg=0';   // the airways' height, at the lowest throttle, for the targeting checks
@@ -444,7 +451,7 @@ async function ready(p) {
   {
     const v = await launch({ width: 1440, height: 810, reduce: true });
     const wait = async (expr, n = 120) => { for (let i = 0; i < n && !(await v.eval(expr)); i++) await v.sleep(500); return v.eval(expr); };
-    await v.goto('../site5/index.html?seed=7&traffic=0', 300); await ready(v);
+    await v.goto('../site5/index.html?seed=7&traffic=0&clouds=1', 300); await ready(v);   // (the clouds are off unless asked for)
     const clouds = await wait('!!(SITE5.world && SITE5.world.cloudsReady)'); await v.sleep(2500);
     check('clouds draw', clouds, JSON.stringify(await v.eval('SITE5.world && SITE5.world.loads')));
     const best = JSON.parse(await v.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * h);
@@ -452,6 +459,8 @@ async function ready(p) {
       for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > b[0] + b[1] + b[2]) b = [px[i], px[i + 1], px[i + 2]]; r(JSON.stringify(b)); }))`));
     check('the sky is lit at dusk, warm in the west', best[0] > 60 && best[0] > best[2], JSON.stringify(best));
     check('the loading readout goes once the world is in', await v.eval('document.getElementById("loading").hidden'));
+    await v.goto('../site5/index.html?seed=7&traffic=0', 300); await ready(v);
+    check('the clouds are off by default', !(await v.eval('SITE5.world.cloudsReady || SITE5.envClouds')));
     // the monitor meters its picture like a camera: deep in the twilight (the default start, sun -6.7 deg) it opens
     // up instead of showing black
     await wait('SITE5.world.exposure > 30', 30); await v.sleep(6000);   // it adapts over a few seconds, as an eye does
@@ -459,7 +468,7 @@ async function ready(p) {
       g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let s = 0, n = 0; for (let i = 0; i < px.length; i += 4 * 97) { s += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255; n++; } r(s / n); }))`);
     check('deep twilight is visible, not black: the monitor opens up', dim > 0.05, (dim * 100).toFixed(1) + '% mean, exposure ' + (await v.eval('SITE5.world.exposure')).toFixed(0));
     await v.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(v);
-    await wait('!!(SITE5.world && SITE5.world.cloudsReady)'); await v.sleep(2500);
+    await v.sleep(2500);
     await v.mouse('mousePressed', 720, 760, 1); for (let y = 760; y >= 300; y -= 20) await v.mouse('mouseMoved', 720, y, 1);
     await v.sleep(1500);
     const warm = await v.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);

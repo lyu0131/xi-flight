@@ -32,7 +32,9 @@ const K = 1.62   // the camera's field, as a multiple of the screen's (tan): eno
 const world = S.world = { ready: false, cloudsReady: false, light: 'sun', exposure: 10, loads: {}, srcTan: [1, 1] }
 // the loading readout: what's in so far
 const note = document.getElementById('loading')
-const LOADS = ['atmosphere', 'land', 'cities', 'weather', 'shape', 'detail', 'turbulence', 'noise', 'stars', 'seat'], fails = []
+// the clouds are off for now (owner, 2026-10-08: "get rid of clouds, let me see the city"); ?clouds=1 brings them back
+const CLOUDS = qp.get('clouds') === '1'
+const LOADS = ['atmosphere', 'land', 'cities', ...(CLOUDS ? ['weather', 'shape', 'detail', 'turbulence'] : []), 'noise', 'stars', 'seat'], fails = []
 function loaded(k, fail) {   // fail: what couldn't load, which the readout then keeps saying
   world.loads[k] = true; if (fail && !fails.includes(fail)) fails.push(fail)
   const n = LOADS.filter(x => world.loads[x]).length, say = fails.concat(n < LOADS.length ? ['LOADING THE EARTH · ' + Math.round(n / LOADS.length * 100) + '%'] : [])
@@ -104,7 +106,7 @@ const CAPTURE = qp.get('capture') !== '0'
 const capCam = new THREE.PerspectiveCamera(90, 1, 10, 1e7)
 // (the clouds stay in: the 2026-10-08 spike measured +0.5 ms a frame for one face at 1280x720, +0.1 ms without them,
 // and without them the ground below reads as grey haze instead of white cloud tops)
-S.envClouds = CAPTURE
+S.envClouds = CAPTURE && CLOUDS
 const capAp = CAPTURE ? new AerialPerspectiveEffect(capCam) : null
 if (capAp) capAp.sky = true
 const capClouds = S.envClouds ? new CloudsEffect(capCam) : null
@@ -120,6 +122,7 @@ const CL = capClouds ? [clouds, capClouds] : [clouds], APS = capAp ? [ap, capAp]
 const setAll = (os, k, t) => { for (const o of os) o[k] = t }
 const CA = 'https://cdn.jsdelivr.net/npm/@takram/three-clouds@0.7.6/assets/'
 const rep2 = t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; t.minFilter = THREE.LinearMipMapLinearFilter; t.magFilter = THREE.LinearFilter; t.needsUpdate = true; return t }
+if (CLOUDS) {
 new THREE.TextureLoader().load(CA + 'local_weather.png', t => { setAll(CL, 'localWeatherTexture', rep2(t)); loaded('weather') }, undefined, () => loaded('weather'))
 new THREE.TextureLoader().load(CA + 'turbulence.png', t => { setAll(CL, 'turbulenceTexture', rep2(t)); loaded('turbulence') }, undefined, () => loaded('turbulence'))
 const tex3 = (url, n, k, set) => new DataTextureLoader(THREE.Data3DTexture, parseUint8Array, { width: n, height: n, depth: n }).load(url, t => {
@@ -127,10 +130,11 @@ const tex3 = (url, n, k, set) => new DataTextureLoader(THREE.Data3DTexture, pars
 }, undefined, () => loaded(k))
 tex3(CA + 'shape.bin', CLOUD_SHAPE_TEXTURE_SIZE, 'shape', t => setAll(CL, 'shapeTexture', t))
 tex3(CA + 'shape_detail.bin', CLOUD_SHAPE_DETAIL_TEXTURE_SIZE, 'detail', t => setAll(CL, 'shapeDetailTexture', t))
+}
 new STBNLoader().load(DEFAULT_STBN_URL, t => { setAll(APS.concat(CL), 'stbnTexture', t); loaded('noise') }, undefined, () => loaded('noise'))
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
 composer.addPass(new RenderPass(scene, camera))
-composer.addPass(new EffectPass(camera, clouds, ap))
+composer.addPass(new EffectPass(camera, ...(CLOUDS ? [clouds, ap] : [ap])))
 composer.addPass(new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.AGX })))
 composer.addPass(new EffectPass(camera, warp))
 // the capture's chain: the scene, the air and clouds, then (by hand, below) AgX into capRT. Never the composer's own

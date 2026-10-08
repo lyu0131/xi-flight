@@ -61,9 +61,11 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
 - **Clouds**: Takram's volumetric clouds (their tileable weather; NASA's global cover is a stretch goal), lit by the
   same light, shadows on the ground, composited into the aerial perspective (the sky and the air between).
 - **The light**: the real sun (twilight glow included) until twilight has ended (-10 deg); after that, with the moon
-  up, the moon stands in for it at night exposure (0.45 against 10), easing over 3 s. City lights and stars keep
-  their apparent brightness whatever the exposure. The start: 40 N 13 E, 18 km, heading 262 (west, into the afterglow),
-  `2026-10-08T17:10:00Z` (dusk); `?lat ?lon ?alt ?hdg ?time ?throttle`.
+  up, the moon stands in for it at night exposure (0.45 against 10), easing over 3 s. Under the sun the monitor meters
+  its own picture like a camera: never below the day's 10, opening up to 300 as the twilight dims (wall-clock, 3 s).
+  City lights and stars keep their apparent brightness whatever the exposure. The volumetric clouds are off for now
+  (owner, 2026-10-08); `?clouds=1` brings them back. The start: 40.92 N 14.95 E (east of Naples), 18 km, heading 258
+  (west, the city and the afterglow ahead), `2026-10-08T17:10:00Z` (dusk); `?lat ?lon ?alt ?hdg ?time ?throttle ?clouds`.
 - **The ball**: the camera sits at the suit and looks where the eye looks (local east-north-up x suit x eye), with
   1.62 x the screen's field; the last pass warps it through the ball (screen pixel -> ray from the eye -> ball point
   -> its direction -> the wide picture), so the world bends as on a spherical monitor seen from off its centre.
