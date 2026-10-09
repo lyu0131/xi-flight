@@ -16,7 +16,25 @@ const ASSET = 2275207   // Google Photorealistic 3D Tiles
 // and sky.js tunes it to the machine between DETAIL_MIN (finest) and DETAIL_MAX by the frame time (setDetail)
 const ERROR_TARGET = 8, DETAIL_MIN = 5, DETAIL_MAX = 24
 const DRACO = 'https://cdn.jsdelivr.net/npm/three@0.181.0/examples/jsm/libs/draco/gltf/'
-const D = Math.PI / 180, TOP = 12000   // heightAt casts down from 12 km
+const D = Math.PI / 180, TOP = 30000   // heightAt casts down from 30 km (over the tallest peak at EXAG 3)
+// the relief, exaggerated (owner, 2026-10-09: "scale the mountains up", 3x): every tile vertex's height over the
+// ellipsoid is multiplied by EXAG as the tile loads (?exag= sets it; 1 is the real Earth). Buildings stretch with it.
+// (Done on the CPU, once a tile, so the normals, the raycast floor and the night lights all see the same ground.)
+const EXAG = Math.max(1, +new URLSearchParams(location.search).get('exag') || 3)
+const WA = 6378137, WB = 6356752.314245
+function exaggerate(o) {
+  const g = o.geometry, a = g.attributes.position, M = o.matrixWorld.elements, I = o.matrixWorld.clone().invert().elements
+  const out = new Float32Array(a.count * 3)
+  for (let i = 0; i < a.count; i++) {
+    const x = a.getX(i), y = a.getY(i), z = a.getZ(i)
+    const wx = M[0] * x + M[4] * y + M[8] * z + M[12], wy = M[1] * x + M[5] * y + M[9] * z + M[13], wz = M[2] * x + M[6] * y + M[10] * z + M[14]
+    // its height: the distance out along the radius past the ellipsoid (within 0.2 deg of the normal: fine for this)
+    const r = Math.hypot(wx, wy, wz), nx = wx / r, ny = wy / r, nz = wz / r, re = 1 / Math.sqrt((nx * nx + ny * ny) / (WA * WA) + nz * nz / (WB * WB))
+    const k = (r - re) * (EXAG - 1), px = wx + nx * k, py = wy + ny * k, pz = wz + nz * k
+    out[i * 3] = I[0] * px + I[4] * py + I[8] * pz + I[12]; out[i * 3 + 1] = I[1] * px + I[5] * py + I[9] * pz + I[13]; out[i * 3 + 2] = I[2] * px + I[6] * py + I[10] * pz + I[14]
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(out, 3)); g.computeBoundingSphere(); g.computeBoundingBox()
+}
 
 // a tile's material: its photo, lit by the scene's lights (Takram's sun light and sky light probe) like the flat
 // Earth, instead of the unlit material the tiles arrive with. (The photo keeps its own baked daylight shading.)
@@ -118,10 +136,13 @@ export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
   tiles.addEventListener('load-root-tileset', () => { tiles.errorTarget = state.errorTarget })
   tiles.addEventListener('load-model', e => {
     state.loaded++
+    e.scene.updateMatrixWorld(true)   // (the tile group itself is the identity: ECEF)
     e.scene.traverse(o => {
       if (!o.isMesh || !o.material) return
-      // (the tiles come without normals, which a lit material needs: without them it draws black)
-      if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals()
+      if (EXAG !== 1) exaggerate(o)
+      // (the tiles come without normals, which a lit material needs: without them it draws black; stretched, they're
+      // worked out again for the new slopes)
+      if (!o.geometry.attributes.normal || EXAG !== 1) o.geometry.computeVertexNormals()
       const m = o.material; o.material = tileMaterial(m); m.dispose()
     })
   })

@@ -32,7 +32,7 @@
   // the layout, in ball degrees (see the header)
   var RAIL = -22, GAP = 30, RING_AZ = [90, -90, 180], DOT_R = 26, RULER = 42;
   // the size of every element (cells, plates, ticks, marks), its position unchanged: 0.75 (owner, 2026-10-05)
-  var SZ = 0.15;
+  var SZ = 0.75;
 
   // ---- projection and drawing on the ball ----
   var W = 0, H = 0, E, EQi, SQi, tx, ty, f, GA = 1;   // GA: a fade applied to everything drawn
@@ -338,11 +338,11 @@
     tapes.heading = Math.round(h * 10) / 10;
     // the speed, under the heading caret, with a boost mark
     var kmh = Math.round(p.speed * 3600 / 10) * 10; parts.speedText = kmh + ' KM/H' + (p.boost ? ' · BOOST' : '');
-    ctx.letterSpacing = '2px'; text(dir(0, HT - 1.6), parts.speedText, p.boost ? C.pink : C.line, 0.85, 9, 'center');
+    ctx.letterSpacing = '2px'; text(dir(0, HT - 3.6 * SZ), parts.speedText, p.boost ? C.pink : C.line, 0.85, 9, 'center');
     // and under it where the suit is: latitude, longitude (2 decimals) and height (1 decimal under 100 km)
     var g = p.geo, ll = function (v, pos, neg) { return Math.abs(v).toFixed(2) + '°' + (v < 0 ? neg : pos); };
     parts.posText = ll(g[0], 'N', 'S') + ' ' + ll(g[1], 'E', 'W') + ' · ALT ' + p.alt.toFixed(p.alt < 100 ? 1 : 0) + ' KM';
-    text(dir(0, HT - 3.1), parts.posText, C.line, 0.85, 9, 'center'); ctx.letterSpacing = '0px';
+    text(dir(0, HT - 5.6 * SZ), parts.posText, C.line, 0.85, 9, 'center'); ctx.letterSpacing = '0px';
     stroke(C.line, 0.95, 1.5); path([dir(-0.9 * SZ, HT - 1.8 * SZ), dir(0, HT - 0.8 * SZ), dir(0.9 * SZ, HT - 1.8 * SZ)]);
     var Bn = basis(dir(0, -10));
     stroke(C.salmon, 0.85, 1.4); seg(tp(Bn, -Z(2.6), 0), tp(Bn, -Z(1.7), 0)); seg(tp(Bn, Z(1.7), 0), tp(Bn, Z(2.6), 0));

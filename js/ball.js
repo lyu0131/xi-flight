@@ -204,10 +204,19 @@
     yaw.v = clamp(yaw.v, -110, 110); pitch.v = clamp(pitch.v, -80, 80); pitch.x = clamp(pitch.x, -75, 75);
     spring(bank, reduce ? 0 : clamp(yaw.v * 0.5, -60, 60), 3.2, 0.7, dt);
     suitQ = euler(yaw.x, pitch.x, bank.x);
-    // the floor: 0.3 km over the 3D Earth's terrain where it's loaded (sampled every 0.5 s, here and 0.5 s ahead), never under ALT_LO
-    // (only below 15 km: no ground stands above ~9 km, so higher up there's nothing to clear and no need to ask)
-    if (now - floorT > 500 && S.world && S.world.heightAt && pos[1] < 15) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
-      var g = h === null ? g2 : g2 === null ? h : Math.max(h, g2); floor = g === null ? ALT_LO : Math.max(ALT_LO, g / 1000 + 0.3); }
+    // the floor: 0.3 km over the 3D Earth's terrain where it's loaded, never under ALT_LO: the highest of the ground
+    // here, 0.5 s and 1 s ahead along the flight path, sampled every 0.2 s (at 3x relief the slopes are 3x steeper, and a
+    // ridge at speed must be cleared before it's reached)
+    // (only below 30 km: no ground stands above ~27 km, the relief at 3x (earth3d.js EXAG), so higher up there's
+    // nothing to clear and no need to ask)
+    if (now - floorT > 200 && S.world && S.world.heightAt && pos[1] < 30) {
+      floorT = now; var fw = dir(yaw.x, pitch.x), g = null;
+      [0, 0.5, 1].forEach(function (s_) {
+        var la = clamp(lat + fw[2] * speed * s_ / KM_DEG, -89.9, 89.9), h = S.world.heightAt(la, lon + fw[0] * speed * s_ / (KM_DEG * Math.cos(la * D)));
+        if (h !== null && (g === null || h > g)) g = h;
+      });
+      floor = g === null ? ALT_LO : Math.max(ALT_LO, g / 1000 + 0.3);
+    }
     // flying forward, in km: the flight path is the nose; at the floor or the ceiling the climb is taken out
     if (!reduce) {
       var f = dir(yaw.x, pitch.x);
@@ -230,7 +239,8 @@
       spring(gaze.yaw, gazeAt[0] * 9, 3, 0.8, dt); spring(gaze.pitch, -gazeAt[1] * 6, 3, 0.8, dt);
     }
     // the pilot's resting gaze is the nose itself: the triangle sight is right in front of the eyes
-    var view = { yaw: lead.yaw.x + gaze.yaw.x, pitch: lead.pitch.x + gaze.pitch.x };
+    var ht = S.headTest || [0, 0];   // (a fixed head turn [yaw, pitch], for the tests only: there's no looking round)
+    var view = { yaw: ht[0] + lead.yaw.x + gaze.yaw.x, pitch: ht[1] + lead.pitch.x + gaze.pitch.x };
 
     // Targeting: the contact nearest the boresight, once inside LOCK_IN, is held for LOCK_TIME to lock. The
     // current target is kept until it drifts past LOCK_OUT (or another sits clearly nearer), so the lock never

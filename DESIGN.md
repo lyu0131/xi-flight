@@ -25,7 +25,9 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   2026-10-08): the throttle sets it between `SPD_LO` 0 and `SPD_HI` 40 km/s; the flight **starts standing still**, W to go
   and S back down to a stop (owner, 2026-10-09; on a touch screen, with no W, it starts at 0.2, 8 km/s). W/S work in
   every mode. Shift adds `BOOST` 20. **Height**: starts at `ALT0` **400 km**, ceiling `ALT_HI` **1000 km**, floor `ALT_LO` 1 km or
-  0.3 km over loaded terrain (at a limit the climb is taken out). `?alt=` sets the start, `?seed=` the sky,
+  0.3 km over loaded terrain (the highest of here, 0.5 s and 1 s ahead, every 0.2 s, below 30 km; at a limit the climb
+  is taken out). **Relief 3x** (owner, 2026-10-09): every 3D tile vertex's height over the ellipsoid is tripled as the
+  tile loads (`EXAG` in earth3d.js, `?exag=1` for the real Earth); buildings stretch with it, the floor follows it. `?alt=` sets the start, `?seed=` the sky,
   `?traffic=0` empties it. The dogfight is gone (owner, 2026-10-07: "no shooting").
 - **Traffic** (`js/traffic.js`): seven aircraft round the suit (AIRLINER, FREIGHTER, BIZJET, BALLOON; generic, made-up
   callsigns), spawned 25–55 km out round the heading, dropped past 70 km, seeded. They're the contacts: `d` and
@@ -138,8 +140,7 @@ within 2.5% of where that frame has them, on a 16:9 screen in the still (reduced
   same on both sides; the ticks are spaced to fit between the caps), salmon chevrons at +-26 pointing in.
 - **Side rings** at az +-90 and 180, centred on the rail: a 3.4 deg crosshair circle with radial ticks, a dotted ring (26), two dot grids. (Their ring of coffin cells was
   removed, owner 2026-10-07.)
-- **Element size**: everything is drawn at `SZ` = 0.15 of its measured size, in place (owner: too cluttered at 1, then
-  0.75; 0.15 since 2026-10-09, the cockpit smaller against the world). The speed and position lines keep fixed gaps.
+- **Element size**: everything is drawn at `SZ` = 0.75 of its measured size, in place (owner: too cluttered).
 - **The tall rulers**: full circles round a point off each side (az +-90, el -10, radius 48), through the measured
   ruler path, so they bow toward the middle and curve wherever you look; their dashes slide round with the
   suit's pitch (1.6 deg of arc per degree, a long one every fifth); a coffin column round the same centre just
@@ -268,8 +269,7 @@ capture -> PMREM -> glb atlas + lightmap -> bloom -> Neutral.
   near-miss flash. No sun, moon or key light: the sun's light is already in the picture.
 
 Only the head turning moves it. The pilot's body isn't drawn, so looking straight down shows the seat under where it would be. No tablets (no panels).
-Narrow screens draw the seat and rings closer (`KX`). The whole seat is drawn at `SEAT_K` 0.6, shrunk toward a
-point low in front (`PIV`), so it takes less of the view (owner, 2026-10-09).
+Narrow screens draw the seat and rings closer (`KX`).
 
 ## Palette (sampled off the clips)
 Lines `#AFC0EC` (mix) / `#9CB3E8` / `#BAC4F4`, white ticks `#EEF3FA`, mode word `#FFA3DC`, horizon bars `#FF4F8B` over

@@ -257,10 +257,8 @@ function work(pose) {
 const KEY_IN = [0, 0.00046, 0.00064], ARM_IN = [0, -0.0013, 0], THUMB_IN = 0.00086   // how far each goes in
 
 // On a narrow (portrait) screen the view is too tight to ever take in the grips, so the pair is drawn closer
-// together there (KX < 1); LIFT raises everything a touch. SEAT_K shrinks the whole seat toward PIV, a point low in
-// front (data frame), so it takes less of the view and the world more (owner, 2026-10-09: "the cockpit should be
-// smaller in relation to the world").
-const LIFT = 0.035, SEAT_K = 0.6, PIV = [0, -0.55, 0.6], size = new THREE.Vector2()
+// together there (KX < 1); LIFT raises everything a touch.
+const LIFT = 0.035, size = new THREE.Vector2()
 S.seat.ready = true
 S.renderers.push(function (pose, W, H) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
@@ -269,7 +267,7 @@ S.renderers.push(function (pose, W, H) {
   // the camera: the old projection (x / z over the tan), the head's turn with z flipped into Three axes
   camera.fov = 2 * Math.atan(ty) / D; camera.aspect = tx / ty; camera.updateProjectionMatrix()
   camera.quaternion.set(-HQ[0], -HQ[1], HQ[2], HQ[3])
-  root.scale.set(KX * SEAT_K, SEAT_K, SEAT_K); root.position.set(0, PIV[1] * (1 - SEAT_K) + LIFT, -PIV[2] * (1 - SEAT_K))
+  root.scale.x = KX; root.position.y = LIFT
   flash.intensity = pose.flash * 1.6 * Math.PI   // (Three's ambient gives albedo x light / pi: this is the old strength)
   if (S.env && S.env.faces && S.env.n !== envN) { envN = S.env.n; upload(S.env.faces); S.seat.captures = envN }
   // strapping in: the clamshells start open and swing shut over the first two seconds once the seat is in (closed
@@ -314,7 +312,7 @@ S.renderers.push(function (pose, W, H) {
   S.parts.ringTurn = turns; S.parts.ringOpen = Math.round(open); S.parts.controls = ctl; S.parts.controlsL = ctlL
   S.parts.ringGroups = rings.map(rg => Object.keys(rg.meshes))
   // what shows, per group: how many of its sample points land on the screen (for the tests; in the data's frame)
-  const drawn = {}, proj = function (p) { var e = m.qrot(HQi, [p[0] * KX * SEAT_K, p[1] * SEAT_K + PIV[1] * (1 - SEAT_K) + LIFT, p[2] * SEAT_K + PIV[2] * (1 - SEAT_K)]); return e[2] > 0.02 ? [W / 2 + e[0] / e[2] / tx * W / 2, H / 2 - e[1] / e[2] / ty * H / 2] : null; }
+  const drawn = {}, proj = function (p) { var e = m.qrot(HQi, [p[0] * KX, p[1] + LIFT, p[2]]); return e[2] > 0.02 ? [W / 2 + e[0] / e[2] / tx * W / 2, H / 2 - e[1] / e[2] / ty * H / 2] : null; }
   if (S.frames % 15 === 0) {   // for the tests only: no need every frame
     Object.keys(points).forEach(function (g) { drawn[g] = points[g].filter(function (p) { var s = proj(p); return s && s[0] >= 0 && s[0] <= W && s[1] >= 0 && s[1] <= H; }).length; });
     S.parts.seat = drawn

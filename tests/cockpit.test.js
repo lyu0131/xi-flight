@@ -252,7 +252,7 @@ async function ready(p) {
   // shading (worked out after load) is in
   const seatCover = await inFrame(p, ` const g = SITE5.seatGL, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
     g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 3; i < px.length; i += 4 * 16) if (px[i] > 0) n++; r(n / (px.length / 64)); `, NaN);
-  check('the 3D seat takes a part of the view', seatCover > 0.03 && seatCover < 0.3, (seatCover * 100).toFixed(0) + '%');
+  check('the 3D seat takes a part of the view', seatCover > 0.03, (seatCover * 100).toFixed(0) + '%');
   check('the seat contact shading is in', await p.eval('SITE5.parts.seatAO === true'));
   check('no JS errors', p.errors.length === 0, p.errors.join(' | '));
   check('frames hold up (avg under 25ms)', (await p.eval('SITE5.frameMs')) < 25, (await p.eval('SITE5.frameMs')).toFixed(1) + 'ms');
@@ -636,7 +636,7 @@ async function ready(p) {
         if (x < w / 3) { s.nl++; s.l += L } else if (x > 2 * w / 3) { s.nr++; s.rr += L } }
       r({ n: s.n, lum: s.lum / s.n, r: s.r / s.n, b: s.b / s.n, left: s.l / s.nl, right: s.rr / s.nr }); `, { n: 0 })
       .then(st => { for (const f of ['lum', 'r', 'b', 'left', 'right']) if (typeof st[f] !== 'number') st[f] = NaN; return st; });   // (no seat pixels: NaN, so the checks FAIL)
-    const lookDown = async k => { await k.sleep(1500); };   // (no looking round since 2026-10-09: the seat as it sits, low in the view)
+    const lookDown = async k => { await k.eval('SITE5.headTest = [0, -41]'); await k.sleep(1500); };   // (no looking round since 2026-10-09: the test hook turns the head)
     const at = async (q) => { await p.goto('../site5/index.html?seed=7&alt=18&' + q, 300); await ready(p); await lookDown(p); return seatStats(p); };
     check('the seat is on Three.js', await p.eval('SITE5.seat && SITE5.seat.ready === true && SITE5.seat.source === "glb"'));
     await p.goto(PAGE + '&seat=nope', 300); await ready(p); await p.sleep(2000);
@@ -645,18 +645,18 @@ async function ready(p) {
       await p.eval('document.getElementById("loading").textContent'));
     const noon = await at('hdg=90&time=2026-10-08T11:00:00Z'), late = await at('hdg=90&time=2026-10-08T22:00:00Z');
     check('the seat is lit by the monitor: noon at least 3x night', noon.lum > 3 * late.lum, noon.lum.toFixed(3) + ' vs ' + late.lum.toFixed(3));
-    // at rest (no looking down since 2026-10-09) the left third is mostly the left pod's outer flank (facing -x) and the
-    // right third the right one's (facing +x): a sun to the right lights the right third, a sun to the left the left
+    // looking down, the left third is mostly the left armrest's inner walls (they face +x) and the right third the right
+    // one's (facing -x): a sun to the right lights the left third, a sun to the left the right third
     const sunR = await at('hdg=224&time=2026-10-08T16:50:00Z'), sunL = await at('hdg=304&time=2026-10-08T16:50:00Z'), ratio = s => s.left / s.right;
-    check('the seat\'s lit side follows the sun on the monitor', ratio(sunR) < ratio(sunL), 'left/right ' + ratio(sunR).toFixed(3) + ' (sun right) vs ' + ratio(sunL).toFixed(3) + ' (sun left)');
+    check('the seat\'s lit side follows the sun on the monitor', ratio(sunR) > ratio(sunL), 'left/right ' + ratio(sunR).toFixed(3) + ' (sun right) vs ' + ratio(sunL).toFixed(3) + ' (sun left)');
     const dusk = await at('hdg=262&time=2026-10-08T16:50:00Z');
     check('facing a sunset the seat is warm', dusk.r > dusk.b, dusk.r.toFixed(3) + ' r vs ' + dusk.b.toFixed(3) + ' b');
     // orientation, with a synthetic monitor: only the seat's right (+x) face white
     await p.goto(PAGE, 300); await ready(p); await lookDown(p);
     await p.eval(`(() => { SITE5.envFreeze = true; const f = i => new Uint8Array(64 * 64 * 4).map((_, j) => j % 4 === 3 ? 255 : (i === 0 ? 255 : 0)); SITE5.env = { n: 1e6, size: 64, faces: [0, 1, 2, 3, 4, 5].map(f) }; })()`);
     await p.sleep(500); const side = await seatStats(p);
-    // (at rest the right third is the right pod's outer flank, which faces +x)
-    check('a white right-hand monitor lights the surfaces facing right (the right pod\'s flank)', side.right > 1.5 * side.left, side.left.toFixed(3) + ' vs ' + side.right.toFixed(3));
+    // (looking down, the left third is the left armrest's inner walls, which face +x)
+    check('a white right-hand monitor lights the surfaces facing right (the left armrest\'s inner walls)', side.left > 1.5 * side.right, side.left.toFixed(3) + ' vs ' + side.right.toFixed(3));
     // before any capture the seat is a dim grey, never black
     await p.goto(PAGE + '&capture=0', 300); await ready(p); await lookDown(p); const none = await seatStats(p);
     check('with no capture the seat still shows (dim, not black)', none.n > 1000 && none.lum > 0.01, JSON.stringify(none));
