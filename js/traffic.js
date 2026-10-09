@@ -38,10 +38,13 @@
     function spawn(suit) {
       var type = pick(), T = TYPES[type], brg = suit.heading + (rnd() * 2 - 1) * 70, dist = 25 + rnd() * 30;
       var hdg = brg + 180 + (rnd() * 2 - 1) * 100;   // broadly toward or across the suit's way
-      var no = 10 + Math.floor(rnd() * 890);
+      var no = 10 + Math.floor(rnd() * 890), alt = T.alt[0] + rnd() * (T.alt[1] - T.alt[0]);
+      // only an aircraft that will be in reach: high above the airways (the suit starts at 400 km) none is, and the sky
+      // stays empty -- before, 7 were spawned and dropped again every step, so nothing lived long enough to be locked
+      if (Math.hypot(dist, alt - suit.pos[1]) > OUT - 5) return;
       list.push({
         id: 't' + n++, type: type, callsign: (type === 'BALLOON' ? 'WX' : PREFIX[Math.floor(rnd() * PREFIX.length)]) + ' ' + no,
-        pos: [suit.pos[0] + Math.sin(brg * D) * dist, T.alt[0] + rnd() * (T.alt[1] - T.alt[0]), suit.pos[2] + Math.cos(brg * D) * dist],
+        pos: [suit.pos[0] + Math.sin(brg * D) * dist, alt, suit.pos[2] + Math.cos(brg * D) * dist],
         hdg: ((hdg % 360) + 360) % 360, spd: T.spd, turnTo: hdg, turnAt: 30 + rnd() * 30, age: 0, trail: [], trailT: 0
       });
     }
@@ -67,7 +70,7 @@
           list.push({ id: 't' + n++, type: 'AIRLINER', callsign: 'KTR 214', hdg: ((suit.heading + 90) % 360 + 360) % 360, spd: 0.25,
             pos: [suit.pos[0] + Math.sin(b * D), suit.pos[1] + 0.05, suit.pos[2] + Math.cos(b * D)], turnTo: suit.heading + 90, turnAt: 1e9, age: 0, trail: [], trailT: 0 });
         }
-        while (list.length < KEEP) spawn(suit);
+        for (var tries = 0; list.length < KEEP && tries < KEEP * 2; tries++) spawn(suit);
         return list.map(function (a) {
           var v = a.v || seen(a, suit); a.v = null;
           return { id: a.id, type: a.type, callsign: a.callsign, pos: a.pos.slice(), hdg: a.hdg, spd: a.spd, span: TYPES[a.type].span, d: v.d, range: v.range, trail: a.trail };

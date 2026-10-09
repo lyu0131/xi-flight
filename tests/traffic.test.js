@@ -32,6 +32,19 @@ check('they leave and are replaced', () => {
   const gone = [...seen].filter(id => !last.has(id)).length;
   assert.ok(gone >= 3, 'gone ' + gone);
 });
+// high above the airways nothing can come within 70 km: the sky is empty, not refilled with new aircraft every step
+// (from 400 km it spawned 7 and dropped them again every frame, ~1500 a second, so nothing could ever be locked)
+check('from 400 km up the sky is empty, no churn', () => {
+  const tr = makeTraffic(7), suit = { pos: [0, 400, 0], heading: 0 };
+  for (let i = 0; i < 100; i++) assert.strictEqual(tr.step(0.1, suit).length, 0, 'step ' + i);
+});
+check('coming back down, aircraft return and stay', () => {
+  const tr = makeTraffic(7), suit = { pos: [0, 400, 0], heading: 0 };
+  for (let i = 0; i < 20; i++) tr.step(0.1, suit);
+  suit.pos[1] = 11; const a = tr.step(0.1, suit).map(c => c.id), b = tr.step(0.1, suit).map(c => c.id);
+  assert.ok(a.length >= 6, 'count ' + a.length);
+  assert.ok(a.every(id => b.includes(id)), 'the same aircraft a step later: ' + a + ' / ' + b);
+});
 check('directions are unit vectors', () => {
   fly(5, 30, 0.5, cs => cs.forEach(c => assert.ok(Math.abs(Math.hypot(...c.d) - 1) < 1e-6, c.id)));
 });
