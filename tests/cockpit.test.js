@@ -300,6 +300,13 @@ async function ready(p) {
     const q = await launch({ width: 1200, height: 700 });
     const BASE = '../site5/index.html?seed=7&hdg=0&alt=18';
     const key = (type, k, code, vk) => q.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk });
+    // chasing an aircraft the autopilot slows to 0.5 km/s (5x speed raced past them, so it could never hold a lock),
+    // and runs back up to the throttle's speed when it has none
+    await q.goto('../site5/index.html?seed=7&mode=free&alt=11&hdg=0&throttle=0.5&tiles=0&nightlights=0', 300); await ready(q);
+    for (let i = 0; i < 100 && !(await q.eval('SITE5.pose.chasing')); i++) await q.sleep(100);
+    await q.sleep(4000);
+    const chase = JSON.parse(await q.eval('JSON.stringify({ chasing: SITE5.pose.chasing, speed: SITE5.pose.speed })'));
+    check('chasing an aircraft the autopilot slows right down', chase.chasing === true && chase.speed < 15, JSON.stringify(chase));   // (from 21 km/s at half throttle: (range - 8) x 0.4 once close)
     const left = on => key(on ? 'keyDown' : 'keyUp', 'ArrowLeft', 'ArrowLeft', 37);
     const press = async (k, code, vk) => { await key('keyDown', k, code, vk); await key('keyUp', k, code, vk); await q.sleep(60); };
     await q.goto(BASE, 300); await ready(q);

@@ -72,7 +72,11 @@
   // speed: the throttle (0..1) sets it between SPD_LO and SPD_HI km/s; a boost adds BOOST while held; the actual
   // speed follows on a lag. 5x the real-scale range since the owner asked, 2026-10-08: 2.5-40 km/s, cruise 10
   // (throttle 0.2), boost +20. ?throttle= sets the start.
-  var SPD_LO = 2.5, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', 0.2), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
+  // (chasing an aircraft the autopilot keeps the throttle's speed until it's close, then slows as it closes in:
+  // (range - 8 km) x 0.4 a second (20 km: 4.8 km/s, 12 km: 1.6, 9 km: 0.5), never under CHASE_SPD nor over the
+  // throttle's speed: the throttle's range, 5x the old one, raced past them
+  // faster than a lock could hold, owner 2026-10-09 chose to slow it down for the chase)
+  var CHASE_SPD = 0.5, SPD_LO = 2.5, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', 0.2), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
   var mouse = null, looking = false, DEAD = 0.08;   // the cursor (-1..1 from the centre, or null if not over the page)
   var yaw = { x: qs('hdg', 258), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
   var seat = [{ x: 0, v: 0 }, { x: 0, v: 0 }, { x: 0, v: 0 }];   // offset in the ball, in ball radii
@@ -176,7 +180,8 @@
     // the throttle: W/S move it (0.5 a second) and it stays; Shift boosts; FREE leaves it alone
     var boosting = mode !== 'FREE' && !!keys.b;
     if (mode !== 'FREE') throttle = clamp(throttle + ((keys.tu ? 1 : 0) - (keys.td ? 1 : 0)) * 0.8 * dt, 0, 1);
-    if (!reduce) speed += (SPD_LO + throttle * (SPD_HI - SPD_LO) + (boosting ? BOOST : 0) - speed) * Math.min(1, dt * 1.2);
+    var chasing = !manual && ap.id !== null, cruise = SPD_LO + throttle * (SPD_HI - SPD_LO) + (boosting ? BOOST : 0);   // (the autopilot has an aircraft: it slows for the chase, then runs back up)
+    if (!reduce) speed += ((chasing ? clamp((ap.range - 8) * 0.4, CHASE_SPD, cruise) : cruise) - speed) * Math.min(1, dt * 1.2);
     if (!reduce) T += dt;
     // the traffic round the suit, as seen from it (still under reduced motion)
     tr = tr || (S.makeTraffic && S.makeTraffic(SEED, { near: qs('near', 0) > 0 }));
@@ -209,13 +214,14 @@
       // last 20s and closes on it with a lag, so it drifts into the sight, until it has held a lock on it for 4s;
       // with none in reach it wanders in slow banks, levelling off
       var now_ = T, tgt = contacts.filter(function (c) { return c.id === ap.id; })[0];
+      ap.range = tgt ? tgt.range : 0;
       if (tgt && locked && lockId === tgt.id) ap.held += dt;
       if (!tgt || ap.held > 4) {
         if (tgt) ap.done[tgt.id] = now_;
         for (var k in ap.done) if (now_ - ap.done[k] >= 20) delete ap.done[k];   // only the last 20s matter
         tgt = contacts.filter(function (c) { return c.off < 60 && !(now_ - (ap.done[c.id] || -1e9) < 20); })
           .reduce(function (a, b) { return !a || b.off < a.off ? b : a; }, null);
-        ap.id = tgt ? tgt.id : null; ap.held = 0;
+        ap.id = tgt ? tgt.id : null; ap.held = 0; ap.range = tgt ? tgt.range : 0;
       }
       // it holds its height (where the pilot left it), tilting only a little toward an aircraft above or below
       if (ap.alt === null) ap.alt = pos[1];
@@ -275,7 +281,7 @@
     S.pose = {
       suitQ: suitQ, contacts: contacts, eye: eye, eyeQ: qmul(seatQ, euler(view.yaw, view.pitch, 0)),
       heading: ((yaw.x % 360) + 360) % 360, pitch: pitch.x, flash: flash, pos: pos.slice(), alt: pos[1], speed: speed, geo: [lat, lon], throttle: throttle, boost: boosting,
-      locked: locked, lockT: lockT, lockId: lockId, pilot: manual ? 'MANUAL' : 'AUTO', mode: mode,
+      locked: locked, lockT: lockT, lockId: lockId, pilot: manual ? 'MANUAL' : 'AUTO', chasing: chasing, mode: mode,
       modeWord: mode === 'HYBRID' ? (manual ? 'MANUAL' : 'HYBRID') : mode, head: view, t: T, paused: paused,
       stick: [clamp(yaw.v / 55, -1, 1), clamp(pitch.v / 40, -1, 1)]   // the grips' deflection: turn (+ right), climb (+ up)
     };
