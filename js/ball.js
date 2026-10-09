@@ -217,7 +217,8 @@
     spring(bank, reduce ? 0 : clamp(yaw.v * 0.5, -60, 60), 3.2, 0.7, dt);
     suitQ = euler(yaw.x, pitch.x, bank.x);
     // the floor: 0.3 km over the 3D Earth's terrain where it's loaded (sampled every 0.5 s, here and 0.5 s ahead), never under ALT_LO
-    if (now - floorT > 500 && S.world && S.world.heightAt) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
+    // (only below 15 km: no ground stands above ~9 km, so higher up there's nothing to clear and no need to ask)
+    if (now - floorT > 500 && S.world && S.world.heightAt && pos[1] < 15) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
       var g = h === null ? g2 : g2 === null ? h : Math.max(h, g2); floor = g === null ? ALT_LO : Math.max(ALT_LO, g / 1000 + 0.3); }
     // flying forward, in km: the flight path is the nose; at the floor or the ceiling the climb is taken out
     if (!reduce) {

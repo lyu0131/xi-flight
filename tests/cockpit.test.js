@@ -21,7 +21,9 @@ async function launch(o) {
   };
   return p;
 }
-const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0&hdg=0';   // the airways' height, at the lowest throttle, for the targeting checks
+// the airways' height, at the lowest throttle, for the targeting checks -- with the 3D tiles off: streaming them low
+// over the ground jitters the frame timing these lock-and-hold checks measure (the 3D Earth has its own block)
+const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0&hdg=0&tiles=0';
 // a read inside a frame that can't hang the run: if no frame comes within 3 s, or the read throws, it gives `none`
 const inFrame = (p, body, none) => Promise.race([p.eval(`new Promise(r => requestAnimationFrame(() => { ${body} }))`),
   new Promise(r => setTimeout(() => r(none), 3000))]).then(v => v == null ? none : v);
@@ -287,7 +289,7 @@ async function ready(p) {
     check('north raises the latitude', north > 85 && north < 115 && Math.abs(g1[1] - g0[1]) < 0.01, JSON.stringify({ g0, g1, north }));
     await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&lon=179.99&hdg=90&alt=18', 300); await ready(a); await a.sleep(3000);
     const gd = JSON.parse(await pose(a, 'JSON.stringify(s.geo)'));
-    check('the date line wraps', Number.isFinite(gd[1]) && gd[1] > -180 && gd[1] < -179, JSON.stringify(gd));
+    check('the date line wraps', Number.isFinite(gd[1]) && gd[1] > -180 && gd[1] < -170, JSON.stringify(gd));   // (crossed east into the -180.. side; how far depends on how long the page took to load)
     await a.goto(PAGE + '&traffic=0', 300); await ready(a); await a.sleep(2000);
     check('targeting with no contacts', a.errors.length === 0 && (await pose(a, 's.lockId')) === null && (await pose(a, 's.contacts.length')) === 0, a.errors.join(' | '));
     a.close();
@@ -529,6 +531,16 @@ async function ready(p) {
       // the cracks between tiles show the fallback Earth under them; the deeper it is, the brighter the haze in a crack
       // (at 1 km down they showed as streaks): it stays just under the lowest sea surface
       check('the fallback Earth sits just under the tiles (no haze streaks in the cracks)', await t.eval('SITE5.world.earthDrop >= 110 && SITE5.world.earthDrop <= 200'), String(await t.eval('SITE5.world.earthDrop')));
+      // the detail follows the frame time: headless frames run fast, so it should have gone finer than the start (8)
+      await t.sleep(7000);
+      const et = await t.eval('SITE5.world.tiles.errorTarget');
+      check('the 3D detail tunes itself to the machine (finer on fast frames, never past 5)', et < 8 && et >= 5, String(et));
+      // low down over the Alps (where the terrain floor asks for the ground's height) the flight and the tiles run on
+      await t.goto('../site5/index.html?seed=7&throttle=0&mode=input&lat=45.9&lon=7.0&hdg=60&alt=12&time=2026-10-08T11:00:00Z', 300); await ready(t);
+      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
+      const low = JSON.parse(await t.eval('JSON.stringify({ alt: SITE5.pose.alt, f: SITE5.frames, tiles: SITE5.world.tiles.loaded })')); await t.sleep(2000);
+      const low2 = await t.eval('SITE5.frames');
+      check('low over the Alps the flight runs on (finite height, frames advancing, tiles in)', Number.isFinite(low.alt) && low2 > low.f + 30 && low.tiles > 20, JSON.stringify(low) + ' -> ' + low2);
       // at dusk from 80 km the sun is still up where the suit is but the ground below is in the Earth's shadow: the
       // tiles' steep faces mustn't catch it (they showed as pink-white streaks, 151 of these slivers before the fix).
       // Counted on the world's canvas alone (no HUD, no seat): a bright pixel standing well above both its neighbours
@@ -550,7 +562,8 @@ async function ready(p) {
       await t.goto('../site5/index.html?seed=7&lat=45.8326&lon=6.8652&alt=1&hdg=0&throttle=0&time=2026-10-08T11:00:00Z', 300); await ready(t); await t.sleep(6000);
       const alt = await t.eval('SITE5.pose.alt'), ground = await t.eval('SITE5.world.heightAt(SITE5.pose.geo[0], SITE5.pose.geo[1])');
       check('the suit stays above the mountains (floor = terrain + 0.3 km)', ground === null || alt >= ground / 1000 + 0.29, alt.toFixed(2) + ' km over ' + ground);
-      await t.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&alt=10&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      // (idle throttle and a prompt look: at 5x speed a long wait carries the suit out over the dark sea)
+      await t.goto('../site5/index.html?seed=7&traffic=0&mode=input&throttle=0&lat=40.85&lon=14.27&alt=10&time=2026-10-08T22:00:00Z', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
       await t.mouse('mousePressed', 640, 700, 1); for (let y = 700; y >= 250; y -= 20) await t.mouse('mouseMoved', 640, y, 1); await t.sleep(2500);
       const warm = await inFrame(t, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);

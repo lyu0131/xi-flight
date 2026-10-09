@@ -85,9 +85,12 @@ scene.add(sunLight, sunLight.target, skyLight)
 // the 3D Earth (earth3d.js): Google's photoreal tiles, when there's a key (js/keys.js) and no ?tiles=0.
 // ?tilestoken=bad (a test hook) puts in a key that ion refuses
 const TOKEN = qp.get('tilestoken') === 'bad' ? 'bad' : window.SITE5_KEYS && window.SITE5_KEYS.cesiumIon
+// ?detail=<px> pins the 3D Earth's detail (its error target) instead of tuning it to the frame time
+const DETAIL = +qp.get('detail') || 0
 const earth3d = TOKEN && qp.get('tiles') !== '0'
   ? makeEarth3D({ scene, camera, renderer, token: TOKEN, onFail: () => loaded('tiles', "THE 3D EARTH COULDN'T LOAD · FLAT EARTH SHOWN") })
   : null
+if (earth3d && DETAIL) earth3d.setDetail(DETAIL)
 world.tiles = earth3d ? earth3d.state : { on: false, loaded: 0, failed: false }
 world.heightAt = earth3d ? earth3d.heightAt : () => null
 // the stars: points at infinity, turned with the Earth
@@ -236,7 +239,13 @@ let expo = null, lastT = 0, meterGoal = 0
 // exposure from the day's 10 up to EXPO_MAX; brighter than that (day, sunset) it stays at 10, as before
 const METER = 0.1, EXPO_MAX = 300
 S.renderers.push(function (pose, Wd, Hd) {
-  if (pose.t > checkAt) { checkAt = pose.t + 2; if (S.frameMs > 21 && scale > 0.6) scale = Math.max(0.6, scale - 0.15) }
+  // every 2 s: the 3D Earth's detail follows the frame time (finer while frames run under 10 ms, coarser over 17 ms),
+  // and only past that, at 21 ms, does the picture's resolution step down
+  if (pose.t > checkAt) {
+    checkAt = pose.t + 2
+    if (earth3d && !earth3d.state.failed && !DETAIL) earth3d.setDetail(earth3d.state.errorTarget * (S.frameMs < 10 ? 1 / 1.25 : S.frameMs > 17 ? 1.25 : 1))
+    if (S.frameMs > 21 && scale > 0.6) scale = Math.max(0.6, scale - 0.15)
+  }
   const w = Math.max(1, Math.round(Wd * scale)), h = Math.max(1, Math.round(Hd * scale))
   if (w !== bw || h !== bh) { bw = w; bh = h; composer.setSize(w, h, false); earth3d && earth3d.resize() }
   const tx = S.cam.tx, ty = S.cam.ty, sx = tx * K, sy = ty * K
@@ -275,7 +284,9 @@ S.renderers.push(function (pose, Wd, Hd) {
   const U_ = warp.uniforms
   U_.get('uEye').value.set(pose.eye[0], pose.eye[1], pose.eye[2]); U_.get('uEyeM').value.fromArray(mat(pose.eyeQ))
   U_.get('uTan').value.set(tx, ty); U_.get('uSrc').value.set(sx, sy)
-  if (earth3d) earth3d.update()
+  // (the tiles start streaming only once the atmosphere's tables are worked out: a thousand tiles arriving at once
+  // starved that one-off GPU job, so the world never came ready and the monitor capture never started)
+  if (earth3d && atmo) earth3d.update()
   composer.render()
   if (atmo && !world.ready) world.ready = true
   if (capComposer && atmo) capture(pose)

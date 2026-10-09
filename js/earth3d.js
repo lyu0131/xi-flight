@@ -12,7 +12,9 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { Geodetic } from '@takram/three-geospatial'
 
 const ASSET = 2275207   // Google Photorealistic 3D Tiles
-const ERROR_TARGET = 16   // px of screen-space error a tile may show before it splits (see the spike in the task report)
+// px of screen-space error a tile may show before it splits: the detail. It starts at 8 (twice the first build's 16)
+// and sky.js tunes it to the machine between DETAIL_MIN (finest) and DETAIL_MAX by the frame time (setDetail)
+const ERROR_TARGET = 8, DETAIL_MIN = 5, DETAIL_MAX = 24
 const DRACO = 'https://cdn.jsdelivr.net/npm/three@0.181.0/examples/jsm/libs/draco/gltf/'
 const D = Math.PI / 180, TOP = 12000   // heightAt casts down from 12 km
 
@@ -27,6 +29,9 @@ const D = Math.PI / 180, TOP = 12000   // heightAt casts down from 12 km
 // still up while the ground below lies in the Earth's shadow: a tile's steep faces (cliffs, walls, tile edges) facing
 // it then lit up pink-white on the night side (owner 2026-10-08: "what are these white streaks?"). So a point takes
 // the direct light only while that light is over its own horizon (uLightDir, a half-degree soft edge).
+// And while that light is low over a point (under ~10 deg, fully the tile's own shape by ~20 deg) the point is lit by
+// the Earth's smooth curve rather than the tile's facets: coarse far tiles are big flat chords, and a grazing light
+// picked each one out as a bright block along the dusk horizon (owner 2026-10-08). The photos carry their own shading.
 // (the dispose-model handler below disposes it with the tile, the photo included)
 const night = { uNight: { value: null }, uNightK: { value: 0 }, uNightC: { value: new THREE.Color(0xffd9a8) }, uNightSun: { value: new THREE.Vector3(0, 0, 1) }, uLightDir: { value: new THREE.Vector3(0, 0, 1) } }
 const GEO = `varying vec3 vNightW;
@@ -47,7 +52,11 @@ function nightPatch(s) {
   Object.assign(s.uniforms, night)
   s.vertexShader = 'varying vec3 vNightW;\n' + s.vertexShader.replace('#include <project_vertex>',
     '#include <project_vertex>\nvNightW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
-  s.fragmentShader = GEO + s.fragmentShader.replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+  s.fragmentShader = GEO + s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+    {
+      float glat, glon; vec3 gUp = nightGeo(vNightW, glat, glon);
+      normal = normalize(mix((viewMatrix * vec4(gUp, 0.0)).xyz, normal, smoothstep(0.17, 0.34, dot(gUp, uLightDir))));
+    }`).replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
     {
       float lat, lon; vec3 nUp = nightGeo(vNightW, lat, lon);
       float lit = smoothstep(-0.0087, 0.0087, dot(nUp, uLightDir));
@@ -66,14 +75,14 @@ function tileMaterial(m) {
 }
 
 export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
-  const state = { on: true, loaded: 0, failed: false }
+  const state = { on: true, loaded: 0, failed: false, errorTarget: ERROR_TARGET }
   const tiles = new TilesRenderer()
   tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId: ASSET, autoRefreshToken: true }))
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: new DRACOLoader().setDecoderPath(DRACO) }))
   tiles.registerPlugin(new TileCompressionPlugin())
   tiles.errorTarget = ERROR_TARGET
   // (the Google auth plugin, registered once ion answers, sets its own errorTarget of 20: put ours back)
-  tiles.addEventListener('load-root-tileset', () => { tiles.errorTarget = ERROR_TARGET })
+  tiles.addEventListener('load-root-tileset', () => { tiles.errorTarget = state.errorTarget })
   tiles.addEventListener('load-model', e => {
     state.loaded++
     e.scene.traverse(o => {
@@ -138,6 +147,8 @@ export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
     resize() { if (!state.failed) tiles.setResolutionFromRenderer(camera, renderer) },
     // the city lights: the Black Marble map (null until it loads), their strength (sky.js: CITY / exposure) and the
     // real sun's direction (ECEF, unit; never the moon's) that gates them
+    // the detail, kept within DETAIL_MIN..DETAIL_MAX (a lower error target loads finer tiles)
+    setDetail(et) { state.errorTarget = tiles.errorTarget = Math.min(DETAIL_MAX, Math.max(DETAIL_MIN, et)) },
     setNight(map, k, sunDir, lightDir) { night.uNight.value = map; night.uNightK.value = map ? k : 0; night.uNightSun.value.copy(sunDir); night.uLightDir.value.copy(lightDir || sunDir) },
     // the height above the WGS84 ellipsoid: a ray down the ellipsoid's normal from TOP, so the height is TOP less the
     // distance to the first hit (null where nothing is loaded under it)
@@ -147,7 +158,9 @@ export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
       const c = Math.cos(lat * D)
       ray.set(top, new THREE.Vector3(-c * Math.cos(lon * D), -c * Math.sin(lon * D), -Math.sin(lat * D)))
       ray.far = TOP + 1000
-      hits.length = 0; ray.intersectObject(tiles.group, true, hits)
+      // (not recursive: the tile group's own raycast walks the tile tree, testing only the tiles whose bounds the ray
+      // crosses; a recursive cast also tested every triangle of every loaded tile -- seconds a call at fine detail)
+      hits.length = 0; ray.intersectObject(tiles.group, false, hits)
       return hits.length ? TOP - hits[0].distance : null
     }
   }
