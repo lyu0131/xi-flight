@@ -14,7 +14,7 @@
    on the ground) and the stars (the Yale bright-star catalogue) are kept at their apparent brightness. Volumetric
    clouds (Takram), lit by the same light, cast their shadows and sit in the air.
    SITE5.world = { ready, cloudsReady, light, exposure, loads, camera, renderer, srcTan, tiles, heightAt, time: { rate,
-   date }, cityGlowAt(lat, lon) } (tiles and heightAt: the 3D Earth, earth3d.js); SITE5.gl is its WebGL
+   date }, cityGlowAt(lat, lon), nightGlow: { global, near }, nightTiles: { loaded, failed } } (tiles and heightAt: the 3D Earth, earth3d.js); SITE5.gl is its WebGL
    context; SITE5.warp(x, y) is the warp in JS (screen px -> picture uv, or null); SITE5.horizonDip(altKm).
    It also captures the monitor for the seat's light (see capture(), at the end): SITE5.env, SITE5.envFreeze,
    SITE5.envClouds; SITE5.loaded(k) is the loading readout's tick. */
@@ -24,7 +24,8 @@ import { AerialPerspectiveEffect, PrecomputedTexturesGenerator, getSunDirectionE
   SunDirectionalLight, SkyLightProbe, StarsGeometry, StarsMaterial, DEFAULT_STARS_DATA_URL } from '@takram/three-atmosphere'
 import { CloudsEffect, CLOUD_SHAPE_TEXTURE_SIZE, CLOUD_SHAPE_DETAIL_TEXTURE_SIZE } from '@takram/three-clouds'
 import { ArrayBufferLoader, DataTextureLoader, Ellipsoid, Geodetic, parseUint8Array, STBNLoader, DEFAULT_STBN_URL } from '@takram/three-geospatial'
-import { makeEarth3D } from './earth3d.js'
+import { makeEarth3D, night, NIGHT_GLSL, setNight } from './earth3d.js'
+import { makeNightLights } from './nightlights.js'
 
 const S = window.SITE5, m = S.m, D = Math.PI / 180
 const canvas = document.getElementById('world')
@@ -59,14 +60,14 @@ const scene = new THREE.Scene()
 // air (Takram's sun light and sky light probe), NASA's land and sea colour on it and its city lights glowing
 const earthGeo = new THREE.SphereGeometry(1, 720, 360); earthGeo.rotateX(Math.PI / 2)
 const earthMat = new THREE.MeshStandardMaterial({ color: 0x24303c, roughness: 0.92, metalness: 0, emissive: 0x000000 })
-// its city lights glow only where it's dark on the ground, as on the tiles (earth3d.js): x 1 - smoothstep(-6, +2 deg)
-// of the real sun's elevation over each point (up: the point's normalised position; never the moon's)
-const cityU = { uCitySun: { value: new THREE.Vector3(0, 0, 1) } }
+// its city lights are the tiles' (earth3d.js, nightLight()): the global map and the 500 m mosaic near the suit, each
+// faded by altitude, glowing only where it's dark on the ground (x 1 - smoothstep(-6, +2 deg) of the real sun's
+// elevation over each point, never the moon's), in earthMat.emissive x emissiveIntensity
 earthMat.onBeforeCompile = s => {
-  Object.assign(s.uniforms, cityU)
+  Object.assign(s.uniforms, night)
   s.vertexShader = 'varying vec3 vCityW;\n' + s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvCityW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
-  s.fragmentShader = 'varying vec3 vCityW;\nuniform vec3 uCitySun;\n' + s.fragmentShader.replace('#include <emissivemap_fragment>',
-    '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= 1.0 - smoothstep(-0.104719755, 0.034906585, asin(clamp(dot(normalize(vCityW), uCitySun), -1.0, 1.0)));')
+  s.fragmentShader = 'varying vec3 vCityW;\n' + NIGHT_GLSL + s.fragmentShader.replace('#include <emissivemap_fragment>',
+    '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= nightLight(vCityW);')
 }
 // (150 m below the WGS84 surface: under the 3D tiles it fills their gaps while they stream in, and with no tiles it
 // is the whole Earth. It sits just under the lowest sea surface (the geoid dips to about -106 m), no deeper: through
@@ -79,7 +80,15 @@ const tex = (url, srgb, k, use) => new THREE.TextureLoader().load(url, t => {
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); use(t); loaded(k)
 }, undefined, () => loaded(k, "THE EARTH'S MAPS COULDN'T LOAD"))
 tex('assets/earth/world.topo.200407.3x5400x2700.jpg', true, 'land', t => { earthMat.map = t; earthMat.color.set(0xffffff); earthMat.needsUpdate = true })
-tex('assets/earth/BlackMarble_2016_3km.jpg', true, 'cities', t => { earthMat.emissiveMap = t; earthMat.emissive.set(0xffd9a8); earthMat.needsUpdate = true })
+let cityMap = null
+tex('assets/earth/BlackMarble_2016_3km.jpg', true, 'cities', t => { cityMap = t; earthMat.emissive.set(0xffd9a8) })
+// the sharper night lights near the suit (nightlights.js: NASA GIBS, 500 m), unless ?nightlights=0
+const nightLights = qp.get('nightlights') !== '0' ? makeNightLights({ renderer }) : null
+world.nightTiles = nightLights ? nightLights.state : { loaded: 0, failed: 0 }
+// the night lights' altitude factors (0..1): the global 3 km map is gone below 40 km and full above 60 (low down its
+// pixels are huge soft discs, owner 2026-10-08); the 500 m mosaic fades out below ~10 km (8..15)
+const smoothstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+world.nightGlow = { global: 1, near: 0 }
 const sunLight = new SunDirectionalLight({ distance: 300 }), skyLight = new SkyLightProbe()
 scene.add(sunLight, sunLight.target, skyLight)
 // the 3D Earth (earth3d.js): Google's photoreal tiles, when there's a key (js/keys.js) and no ?tiles=0.
@@ -260,8 +269,9 @@ S.renderers.push(function (pose, Wd, Hd) {
   // and the stars). Under the sun the monitor meters its own picture like a camera (see capture()): never below the
   // day's 10, opening up to EXPO_MAX as the twilight dims. The exposure eases over 3 s toward its goal.
   const now = performance.now() / 1000, r = world.time.rate
+  // (paused, as under reduced motion, pose.t stands still and only a rate over x1 moves the clock)
   // (a frame's wall time is capped at 0.25 s, so a tab that was hidden doesn't jump the clock on its return)
-  offset += (S.reduce ? Math.max(0, r - 1) : r - 1) * Math.min(0.25, lastClock === null ? 0 : now - lastClock) * 1000; lastClock = now
+  offset += (S.reduce || pose.paused ? Math.max(0, r - 1) : r - 1) * Math.min(0.25, lastClock === null ? 0 : now - lastClock) * 1000; lastClock = now
   const date = world.time.date = new Date(START.getTime() + pose.t * 1000 + offset)
   showTime()
   getSunDirectionECEF(date, sun); getMoonDirectionECEF(date, moon)
@@ -278,8 +288,10 @@ S.renderers.push(function (pose, Wd, Hd) {
   ap.moonDirection && ap.moonDirection.copy(moon)
   sunLight.target.position.copy(P); sunLight.update(); skyLight.position.copy(P); skyLight.update()
   earthMat.emissiveIntensity = CITY / exposure; starsMat.intensity = STAR / exposure
-  cityU.uCitySun.value.copy(sun)   // (the real sun gates the city lights, even while the moon lights the scene)
-  if (earth3d) earth3d.setNight(earthMat.emissiveMap, CITY / exposure, sun, light)   // (the same lights on the tiles)
+  const glow = world.nightGlow = { global: smoothstep(40, 60, pose.alt), near: nightLights ? smoothstep(8, 15, pose.alt) : 0 }
+  if (nightLights) nightLights.update(pose.geo[0], pose.geo[1])
+  // (the real sun gates the city lights, even while the moon lights the scene; the same lights on the tiles)
+  setNight(cityMap, CITY / exposure, sun, light, glow, nightLights)
   if (stars) { getECIToECEFRotationMatrix(date, eci); stars.setRotationFromMatrix(eci) }
   const U_ = warp.uniforms
   U_.get('uEye').value.set(pose.eye[0], pose.eye[1], pose.eye[2]); U_.get('uEyeM').value.fromArray(mat(pose.eyeQ))

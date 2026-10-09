@@ -51,6 +51,12 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
 - **Targeting**: the aircraft nearest the boresight, once within 4.5 deg (inside the
   sight), is held 0.5s to lock; the target is kept until it passes 7 deg or another sits 2.5 deg nearer, so the
   lock doesn't flicker. `pose.lockId` names it.
+- **Pause** (brief 2026-10-08): `P`, or the `#pause` button in the `#dock` (above `#time`, styled like MODE; it reads
+  `PAUSE` while flying, `RESUME` while paused). Paused, the flight stands still: the step runs with no time passing
+  (as under reduced motion), so no position, attitude, autopilot or throttle change, the traffic stops and `pose.t`
+  holds; the world clock holds too unless the time controller runs faster than x1 (then it still moves, by rate - 1).
+  Rendering, looking round (drag, right-drag, C; the head still drifts back on the wall clock), the HUD and the time
+  controller run on. `SITE5.pose.paused`. The hint says `P PAUSE`.
 - `SITE5.pose` is the one per-frame snapshot both renderers read; `SITE5.renderers` are called in order.
 
 ## The picture (`js/sky.js`)
@@ -89,6 +95,19 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
   ground**: on the flat Earth (`earthMat`, `onBeforeCompile`) and the tiles (`setNight(map, k, sunDir)`) they're scaled by
   `1 - smoothstep(-6, +2 deg)` of the real sun's elevation over that point (never the moon's, even when it lights the
   scene); `SITE5.world.cityGlowAt(lat, lon)` is the same factor in JS.
+  **Two maps, by altitude** (brief 2026-10-08; the owner on a town seen low down as a huge soft orange disc: "look at
+  how ugly this is"). Both materials share one shader function (`earth3d.js`: `NIGHT_GLSL`, `nightLight()`, its
+  uniforms in the exported `night`, set each frame by the exported `setNight(map, k, sun, light, glow, nightLights)`):
+  - the **global 3 km map** (`BlackMarble_2016_3km.jpg`) x `smoothstep(40, 60, alt km)`: gone below 40 km, full above 60;
+  - the **500 m mosaic** (`js/nightlights.js`): NASA GIBS Black Marble tiles at z8 (Web Mercator, no key, CORS), 16 x 16
+    tiles on a 4096 px canvas centred on the suit's tile, re-centred when the suit is more than 4 tiles off centre (the
+    loaded part moves over by drawing the canvas onto itself; only new tiles are fetched, nearest first, at most 8 in
+    flight); a failed tile stays black. (Its texture is uploaded raw, mipmapped, and the shader decodes the sRGB: tagged sRGB, Chrome converted the whole canvas on the CPU at every upload, ~130 ms frames.) A 16 x 16 mask texture says which tiles are in; the texture, the mask and the
+    mosaic's top-left tile change together, at most twice a second. Where a point's z8 tile is in the mosaic and loaded
+    it shows x `smoothstep(8, 15, alt km)` (fading out below ~10 km, where even 500 m pixels are blobs), blended into the
+    global map over the mosaic's last tile; elsewhere the global map. Colour, `CITY / exposure` and the sun gate are as
+    before. `?nightlights=0` turns the mosaic off. `SITE5.world.nightGlow = { global, near }` (the two factors, 0..1),
+    `SITE5.world.nightTiles = { loaded, failed }` (in the current mosaic).
 - **The world clock** (owner, 2026-10-08): the world's date is `START + pose.t + offset`, and each frame the offset
   runs at (rate - 1) x the wall-clock frame time (capped 0.25 s), so it works under reduced motion too (where pose.t
   stands still, and x0 and x1 both hold the clock). Rates x0 (paused), x1, x60, x600, x3600: `]` faster, `[` slower
@@ -103,8 +122,8 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
   Rendered at 1.3 x the screen (DPR capped 1.5), stepping down by 0.15 (to 0.6) while frames average over 21 ms.
 - **Loading**: `#loading` counts the nine loads in; if the module or a library can't load, it says THE WORLD
   COULDN'T LOAD and the cockpit runs on. `SITE5.world` = { ready, cloudsReady, light, exposure, loads, camera,
-  srcTan, time, cityGlowAt, tiles, heightAt }; `SITE5.warp(x, y)` is the warp in JS; `SITE5.horizonDip(alt)`.
-- Not yet (later phases): a sharper night-lights map (500 m), the cockpit relit by this world (Phase 3),
+  srcTan, time, cityGlowAt, nightGlow, nightTiles, tiles, heightAt }; `SITE5.warp(x, y)` is the warp in JS; `SITE5.horizonDip(alt)`.
+- Not yet (later phases): the cockpit relit by this world (Phase 3),
   the aircraft as 3D models (Phase 4; until then only their HUD marks).
 
 ## The HUD (`js/hud.js`)

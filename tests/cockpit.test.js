@@ -7,7 +7,7 @@ const serve = require('./serve');
 // opened from a local server rooted at the repo
 let srv = null;
 // ONLY=main,3d,... runs just those blocks (main, altitude, modes, traffic, controls, horizon, world, light, 3d,
-// capture, seatlight, reduce, phone, hud, time); unset, everything runs
+// capture, seatlight, reduce, phone, hud, time, pause); unset, everything runs
 const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null, want = n => !ONLY || ONLY.includes(n);
 async function launch(o) {
   const p = await launchFile(o);
@@ -543,8 +543,9 @@ async function ready(p) {
       check('low over the Alps the flight runs on (finite height, frames advancing, tiles in)', Number.isFinite(low.alt) && low2 > low.f + 30 && low.tiles > 20, JSON.stringify(low) + ' -> ' + low2);
       // at dusk from 80 km the sun is still up where the suit is but the ground below is in the Earth's shadow: the
       // tiles' steep faces mustn't catch it (they showed as pink-white streaks, 151 of these slivers before the fix).
-      // Counted on the world's canvas alone (no HUD, no seat): a bright pixel standing well above both its neighbours
-      await t.goto('../site5/index.html?seed=7&alt=80&throttle=0&mode=input', 300); await ready(t);
+      // Counted on the world's canvas alone (no HUD, no seat): a bright pixel standing well above both its neighbours.
+      // (?nightlights=0: the 500 m city lights are sharp bright points by design, and this counter takes them for slivers)
+      await t.goto('../site5/index.html?seed=7&alt=80&throttle=0&mode=input&nightlights=0', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
       await t.sleep(6000);
       const slivers = await inFrame(t, `const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
@@ -563,13 +564,24 @@ async function ready(p) {
       const alt = await t.eval('SITE5.pose.alt'), ground = await t.eval('SITE5.world.heightAt(SITE5.pose.geo[0], SITE5.pose.geo[1])');
       check('the suit stays above the mountains (floor = terrain + 0.3 km)', ground === null || alt >= ground / 1000 + 0.29, alt.toFixed(2) + ' km over ' + ground);
       // (idle throttle and a prompt look: at 5x speed a long wait carries the suit out over the dark sea)
-      await t.goto('../site5/index.html?seed=7&traffic=0&mode=input&throttle=0&lat=40.85&lon=14.27&alt=10&time=2026-10-08T22:00:00Z', 300); await ready(t);
-      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
+      // (16 km, not 10: since the night lights fade by altitude (brief 2026-10-08) the 500 m mosaic is the only glow
+      // there, at full strength, and it fades out below ~10 km: wait for it too)
+      await t.goto('../site5/index.html?seed=7&traffic=0&mode=input&throttle=0&lat=40.85&lon=14.27&alt=16&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20 && SITE5.world.nightTiles.loaded > 100')); i++) await t.sleep(250);
       await t.mouse('mousePressed', 640, 700, 1); for (let y = 700; y >= 250; y -= 20) await t.mouse('mouseMoved', 640, y, 1); await t.sleep(2500);
       const warm = await inFrame(t, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
         g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
       await t.mouse('mouseReleased', 640, 250);
-      check('the cities glow on the 3D Earth at night', warm > 0.2, (warm * 100).toFixed(2) + '% warm');
+      check('the cities glow on the 3D Earth at night', warm > 0.2, (warm * 100).toFixed(2) + '% warm ' + await t.eval('JSON.stringify({ glow: SITE5.world.nightGlow, nt: SITE5.world.nightTiles, alt: SITE5.pose.alt, expo: SITE5.world.exposure })'));
+      // the night lights by altitude (brief 2026-10-08): the coarse 3 km glow fades out low down; a 500 m mosaic streams in
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0&alt=5&lat=42.6&lon=11.2&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
+      check('low down the coarse 3 km city glow is gone', (await t.eval('SITE5.world.nightGlow.global')) === 0, JSON.stringify(await t.eval('SITE5.world.nightGlow')));
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
+      check('from 400 km the global city glow is full', (await t.eval('SITE5.world.nightGlow.global')) === 1);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0&alt=60&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.nightTiles.loaded > 100')); i++) await t.sleep(250);
+      check('the 500 m night-light mosaic streams in round the suit', (await t.eval('SITE5.world.nightTiles.loaded')) > 100, JSON.stringify(await t.eval('SITE5.world.nightTiles')));
+      check('at 60 km the near night lights are on', (await t.eval('SITE5.world.nightGlow.near')) === 1);
       await t.goto('../site5/index.html?seed=7&alt=18', 300); await ready(t); await t.sleep(4000);
       check("Google's attribution shows with the tiles", /google/i.test(await t.eval('document.getElementById("attrib").textContent')), await t.eval('document.getElementById("attrib").textContent'));
       // (ion's required credits: both logos, the Google one once, the ion one inside its link, and only the links take the mouse)
@@ -589,6 +601,7 @@ async function ready(p) {
       check('a bad key says so and the flat Earth flies on', (await t.eval('document.getElementById("loading").textContent')).includes("THE 3D EARTH COULDN'T LOAD") && await t.eval('SITE5.world.tiles.failed && SITE5.frames > 30'));
     } else ['the 3D Earth streams in', 'after a resize the tiles keep loading, no errors', 'it\'s 3D: Mont Blanc stands over 3500 m',
       'the suit stays above the mountains (floor = terrain + 0.3 km)', 'the cities glow on the 3D Earth at night',
+      'low down the coarse 3 km city glow is gone', 'from 400 km the global city glow is full', 'the 500 m night-light mosaic streams in round the suit', 'at 60 km the near night lights are on',
       "Google's attribution shows with the tiles", 'the Google and Cesium ion logos show, linked and sized', 'the full credit fits a 375 px phone', 'a long fast flight: frames hold, no errors', 'a long fast flight: GPU textures stay bounded', 'a bad key says so and the flat Earth flies on'].forEach(skip);
     await t.goto('../site5/index.html?seed=7&tiles=0', 300); await ready(t); await t.sleep(1500);
     check('?tiles=0: the flat Earth, no tiles, no errors', await t.eval('SITE5.world.tiles.on === false && SITE5.world.heightAt(46, 8) === null') && t.errors.length === 0, t.errors.join(' | '));
@@ -723,6 +736,31 @@ async function ready(p) {
       return t.width > 0 && t.left >= 0 && t.right <= innerWidth && !hit(r("mode")) && !hit(r("attrib")) && document.documentElement.scrollWidth <= innerWidth; })()`),
       await p.eval('JSON.stringify(["time", "mode", "attrib"].map(id => document.getElementById(id).getBoundingClientRect()))'));
     check('time: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    p.close();
+  }
+
+  // the pause (brief 2026-10-08): P or #pause stops the flight; the picture, the look and the HUD run on
+  if (want('pause')) {
+    const p = await launch({ width: 1440, height: 900 });
+    await p.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(p);
+    const kp = async () => { for (const type of ['keyDown', 'keyUp']) await p.send('Input.dispatchKeyEvent', { type, key: 'p', code: 'KeyP', windowsVirtualKeyCode: 80 }); };
+    await kp(); await p.sleep(300); const g0 = await pose(p, 'JSON.stringify(s.geo)'), t0 = await pose(p, 's.t'); await p.sleep(2000);
+    check('P pauses the flight (position and clock hold)', (await pose(p, 'JSON.stringify(s.geo)')) === g0 && (await pose(p, 's.t')) === t0 && (await pose(p, 's.paused')) === true);
+    await kp(); await p.sleep(1500);
+    check('P again resumes', (await pose(p, 'JSON.stringify(s.geo)')) !== g0 && (await pose(p, 's.paused')) === false);
+    check('the pause button says what it does', /^(PAUSE|RESUME)$/.test(await p.eval('document.getElementById("pause").textContent.trim()')));
+    // (beyond the brief's checks: a click pauses, the world clock holds at x1 and runs at x60, and it fits a phone)
+    await p.eval('document.getElementById("pause").click()'); await p.sleep(200);
+    const d0 = await p.eval('SITE5.world.time.date.getTime()'); await p.sleep(1000); const d1 = await p.eval('SITE5.world.time.date.getTime()');
+    await p.eval('SITE5.world.time.rate = 60'); await p.sleep(1000); const d2 = await p.eval('SITE5.world.time.date.getTime()');
+    check('a click pauses and says RESUME; the clock holds at x1, a faster rate still runs', (await pose(p, 's.paused')) === true && (await p.eval('document.getElementById("pause").textContent')) === 'RESUME' && d1 === d0 && d2 - d1 > 30000,
+      JSON.stringify({ held: d1 - d0, ran: d2 - d1 }));
+    await p.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await p.sleep(800);
+    check('#pause sits clear of #time, #mode and #attrib at 375 px', await p.eval(`(() => { const e = document.getElementById("attrib"); if (!e.textContent) e.textContent = "Google; Data SIO, NOAA, U.S. Navy, NGA, GEBCO; IBCAO; Landsat / Copernicus · Airbus";
+      const r = id => document.getElementById(id).getBoundingClientRect(), t = r("pause"), hit = o => !(t.right <= o.left || o.right <= t.left || t.bottom <= o.top || o.bottom <= t.top);
+      return t.width > 0 && t.left >= 0 && t.right <= innerWidth && !hit(r("time")) && !hit(r("mode")) && !hit(r("attrib")) && document.documentElement.scrollWidth <= innerWidth; })()`),
+      await p.eval('JSON.stringify(["pause", "time", "mode", "attrib"].map(id => document.getElementById(id).getBoundingClientRect()))'));
+    check('pause: no JS errors', p.errors.length === 0, p.errors.join(' | '));
     p.close();
   }
 

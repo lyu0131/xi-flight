@@ -97,6 +97,15 @@
   S.setMode(mode);
   function nextMode() { S.setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]); }
   if (modeBtn) modeBtn.addEventListener('click', nextMode);
+  // the pause (P, or the PAUSE button): the flight stands still -- position, attitude, autopilot, traffic and pose.t --
+  // while the picture, looking round, the HUD and the time controller run on (the step runs with no time passing,
+  // as under reduced motion; sky.js holds the world clock unless its rate is over x1)
+  var paused = false, pauseBtn = document.getElementById('pause');
+  function togglePause() {
+    paused = !paused;
+    if (pauseBtn) { pauseBtn.textContent = paused ? 'RESUME' : 'PAUSE'; }
+  }
+  if (pauseBtn) pauseBtn.addEventListener('click', togglePause);
   var shake = 0, flash = 0, pos = [0, clamp(qs('alt', ALT0), ALT_LO, ALT_HI), 0], lockT = 0, locked = false, lockId = null;
   var ap = { id: null, held: 0, done: {}, alt: null };   // ...and the height it holds: where the pilot last left it   // the autopilot's current aircraft, how long it's held a lock on it, when each was done
   var LOCK_IN = 4.5, LOCK_OUT = 7, LOCK_TIME = 0.5;   // acquire inside the (small) triangle, release past it
@@ -122,6 +131,7 @@
   addEventListener('keydown', function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'm' || e.key === 'M') { if (!e.repeat) nextMode(); e.preventDefault(); return; }
+    if (e.key === 'p' || e.key === 'P') { if (!e.repeat) togglePause(); e.preventDefault(); return; }
     var r = keyRole(e); if (!r) return;
     if (r === 'look') { keys.look = true; e.preventDefault(); return; }
     if (mode === 'FREE' && modeBtn) {   // the keys don't fly in FREE: say how to take the controls
@@ -154,7 +164,7 @@
   ['pointerup', 'pointercancel'].forEach(function (t) { cockpit.addEventListener(t, function () { dragging = false; lastDrag = performance.now(); }); });
 
   // ---- one step of the simulation ----
-  function step(dt, now) {
+  function step(dt, now, dtLook) {   // (dtLook: the wall frame time, for the head drifting back; dt is 0 while paused)
     // the mouse as a stick: its offset from the centre, past the dead zone; not while looking round
     looking = dragging || !!keys.look;
     var dz = function (v) { return Math.sign(v) * Math.max(0, Math.abs(v) - DEAD) / (1 - DEAD); };
@@ -218,7 +228,7 @@
     suitQ = euler(yaw.x, pitch.x, bank.x);
     // the floor: 0.3 km over the 3D Earth's terrain where it's loaded (sampled every 0.5 s, here and 0.5 s ahead), never under ALT_LO
     // (only below 15 km: no ground stands above ~9 km, so higher up there's nothing to clear and no need to ask)
-    if (now - floorT > 500 && S.world && S.world.heightAt && pos[1] < 15) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
+    if (!paused && now - floorT > 500 && S.world && S.world.heightAt && pos[1] < 15) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
       var g = h === null ? g2 : g2 === null ? h : Math.max(h, g2); floor = g === null ? ALT_LO : Math.max(ALT_LO, g / 1000 + 0.3); }
     // flying forward, in km: the flight path is the nose; at the floor or the ceiling the climb is taken out
     if (!reduce) {
@@ -237,7 +247,7 @@
       spring(seatRoll, -bank.v * 0.05 * FLOAT, 6, 0.4, dt); spring(seatPitch, -pitch.v * 0.03 * FLOAT, 6, 0.4, dt);
     }
     // the head drifts back to the nose once let go
-    if (!dragging && now - lastDrag > 3000) { var k = Math.min(1, dt * 1.6); head.yaw -= head.yaw * k; head.pitch -= head.pitch * k; }
+    if (!dragging && now - lastDrag > 3000) { var k = Math.min(1, dtLook * 1.6); head.yaw -= head.yaw * k; head.pitch -= head.pitch * k; }
     // it leads the move (a third of the turn rate, a little under half the climb rate), and follows the mouse
     if (!reduce) {
       spring(lead.yaw, clamp(yaw.v * 0.3, -24, 24) * FLOAT, 4.2, 0.5, dt); spring(lead.pitch, clamp(pitch.v * 0.42, -20, 20) * FLOAT, 4.2, 0.5, dt);
@@ -266,7 +276,7 @@
       suitQ: suitQ, contacts: contacts, eye: eye, eyeQ: qmul(seatQ, euler(view.yaw, view.pitch, 0)),
       heading: ((yaw.x % 360) + 360) % 360, pitch: pitch.x, flash: flash, pos: pos.slice(), alt: pos[1], speed: speed, geo: [lat, lon], throttle: throttle, boost: boosting,
       locked: locked, lockT: lockT, lockId: lockId, pilot: manual ? 'MANUAL' : 'AUTO', mode: mode,
-      modeWord: mode === 'HYBRID' ? (manual ? 'MANUAL' : 'HYBRID') : mode, head: view, t: T,
+      modeWord: mode === 'HYBRID' ? (manual ? 'MANUAL' : 'HYBRID') : mode, head: view, t: T, paused: paused,
       stick: [clamp(yaw.v / 55, -1, 1), clamp(pitch.v / 40, -1, 1)]   // the grips' deflection: turn (+ right), climb (+ up)
     };
   }
@@ -287,7 +297,7 @@
     var dt = last == null ? 1 / 60 : Math.min(0.05, (now - last) / 1000);
     if (last != null) avg += ((now - last) - avg) * 0.05;
     last = now;
-    step(dt, now);
+    step(paused ? 0 : dt, now, dt);
     var W = innerWidth, H = innerHeight;
     S.cam = camera(W, H); S.frameMs = avg;
     S.renderers.forEach(function (r) { r(S.pose, W, H); });

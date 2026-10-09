@@ -4,7 +4,7 @@
    and resize() when the picture changes size. Only the main camera drives the level of detail; the monitor
    capture's cameras see whatever it has loaded.
    makeEarth3D({ scene, camera, renderer, token, onFail }) -> { update, resize, state: { on, loaded, failed }, tiles,
-   heightAt(latDeg, lonDeg), setNight(map, intensity, sunDir, lightDir) }. On an auth or root-tileset failure it calls onFail() once and takes the tiles away. */
+   heightAt(latDeg, lonDeg) }; the night lights' shared uniforms are set by the exported setNight(). On an auth or root-tileset failure it calls onFail() once and takes the tiles away. */
 import * as THREE from 'three'
 import { TilesRenderer } from '3d-tiles-renderer'
 import { CesiumIonAuthPlugin, GLTFExtensionsPlugin, TileCompressionPlugin } from '3d-tiles-renderer/plugins'
@@ -33,9 +33,16 @@ const D = Math.PI / 180, TOP = 12000   // heightAt casts down from 12 km
 // the Earth's smooth curve rather than the tile's facets: coarse far tiles are big flat chords, and a grazing light
 // picked each one out as a bright block along the dusk horizon (owner 2026-10-08). The photos carry their own shading.
 // (the dispose-model handler below disposes it with the tile, the photo included)
-const night = { uNight: { value: null }, uNightK: { value: 0 }, uNightC: { value: new THREE.Color(0xffd9a8) }, uNightSun: { value: new THREE.Vector3(0, 0, 1) }, uLightDir: { value: new THREE.Vector3(0, 0, 1) } }
-const GEO = `varying vec3 vNightW;
-uniform sampler2D uNight;
+// The lights' colour comes from two maps (brief 2026-10-08): the global 3 km map (uNight) and, near the suit, the
+// streamed 500 m mosaic (nightlights.js: uNL, its per-tile loaded mask uNLMask, its top-left z8 tile uNLBox). Where a
+// point's z8 Web-Mercator tile is in the mosaic and loaded, the mosaic shows (x uGlowNear, sky.js: smoothstep(8, 15 km)
+// of the suit's altitude), blended out over the mosaic's last tile; elsewhere the global map (x uGlowGlobal,
+// smoothstep(40, 60 km): low down its 3 km pixels are huge soft discs). nightLight(w) is that, gated by the dark;
+// the flat Earth (sky.js) uses it too. The uniforms are shared module-wide: setNight() reaches every material at once.
+export const night = { uNight: { value: null }, uNightK: { value: 0 }, uNightC: { value: new THREE.Color(0xffd9a8) }, uNightSun: { value: new THREE.Vector3(0, 0, 1) }, uLightDir: { value: new THREE.Vector3(0, 0, 1) },
+  uGlowGlobal: { value: 1 }, uGlowNear: { value: 0 }, uNL: { value: null }, uNLMask: { value: null }, uNLBox: { value: new THREE.Vector2() } }
+// (the header both night materials put in front of their fragment shader)
+export const NIGHT_GLSL = `uniform sampler2D uNight;
 uniform float uNightK;
 uniform vec3 uNightC;
 uniform vec3 uNightSun;
@@ -47,12 +54,32 @@ vec3 nightGeo(vec3 w, out float lat, out float lon) {
   lat = atan(w.z + EP2 * B * st * st * st, p - E2 * A * ct * ct * ct); lon = atan(w.y, w.x);
   return vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
 }
+uniform sampler2D uNL;
+uniform sampler2D uNLMask;
+uniform vec2 uNLBox;
+uniform float uGlowGlobal;
+uniform float uGlowNear;
+// the city lights' colour at a world point, gated by the dark there (not yet x uNightK uNightC)
+vec3 nightLight(vec3 w) {
+  float lat, lon; vec3 up = nightGeo(w, lat, lon);
+  float dark = 1.0 - smoothstep(-0.104719755, 0.034906585, asin(clamp(dot(up, uNightSun), -1.0, 1.0)));
+  vec3 g = texture2D(uNight, vec2(lon / 6.283185307 + 0.5, lat / 3.141592654 + 0.5)).rgb * uGlowGlobal;
+  // the z8 Web-Mercator tile coordinate, relative to the mosaic (x wrapped so its jump lies opposite the mosaic)
+  float t = clamp(lat, -1.48442, 1.48442);
+  vec2 tc = vec2((lon / 6.283185307 + 0.5) * 256.0, (1.0 - log(tan(t) + 1.0 / cos(t)) / 3.141592654) * 128.0);
+  vec2 l = vec2(mod(tc.x - uNLBox.x + 120.0, 256.0) - 120.0, tc.y - uNLBox.y);
+  vec3 n = texture2D(uNL, vec2(l.x, 16.0 - l.y) / 16.0).rgb;   // (sampled outside any branch: mipmaps)
+  n = mix(n / 12.92, pow((n + 0.055) / 1.055, vec3(2.4)), step(0.04045, n)) * uGlowNear;   // (uploaded raw: sRGB -> linear)
+  vec2 e = smoothstep(0.0, 1.0, l) * smoothstep(0.0, 1.0, 16.0 - l);         // 0 outside, blended over the last tile
+  float wN = e.x * e.y * step(0.5, texture2D(uNLMask, (floor(clamp(l, 0.0, 15.0)) + 0.5) / 16.0).r);
+  return dark * mix(g, n, wN);
+}
 `
 function nightPatch(s) {
   Object.assign(s.uniforms, night)
   s.vertexShader = 'varying vec3 vNightW;\n' + s.vertexShader.replace('#include <project_vertex>',
     '#include <project_vertex>\nvNightW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
-  s.fragmentShader = GEO + s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  s.fragmentShader = 'varying vec3 vNightW;\n' + NIGHT_GLSL + s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
     {
       float glat, glon; vec3 gUp = nightGeo(vNightW, glat, glon);
       normal = normalize(mix((viewMatrix * vec4(gUp, 0.0)).xyz, normal, smoothstep(0.17, 0.34, dot(gUp, uLightDir))));
@@ -63,10 +90,16 @@ function nightPatch(s) {
       reflectedLight.directDiffuse *= lit; reflectedLight.directSpecular *= lit;
     }`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
     {
-      float lat, lon; vec3 nUp = nightGeo(vNightW, lat, lon);
-      float dark = 1.0 - smoothstep(-0.104719755, 0.034906585, asin(clamp(dot(nUp, uNightSun), -1.0, 1.0)));
-      totalEmissiveRadiance += dark * uNightK * uNightC * texture2D(uNight, vec2(lon / 6.283185307 + 0.5, lat / 3.141592654 + 0.5)).rgb;
+      totalEmissiveRadiance += uNightK * uNightC * nightLight(vNightW);
     }`)
+}
+// the city lights: the global Black Marble map (null until it loads), their strength (sky.js: CITY / exposure), the
+// real sun's direction (ECEF, unit; never the moon's) that gates them, the light the tiles take (sun or moon), the two
+// maps' altitude factors (global, near) and the 500 m mosaic (nightlights.js, or null)
+export function setNight(map, k, sunDir, lightDir, glow, nl) {
+  night.uNight.value = map; night.uNightK.value = map ? k : 0; night.uNightSun.value.copy(sunDir); night.uLightDir.value.copy(lightDir || sunDir)
+  night.uGlowGlobal.value = glow.global; night.uGlowNear.value = nl ? glow.near : 0
+  if (nl) { night.uNL.value = nl.texture; night.uNLMask.value = nl.loadedMask; night.uNLBox.value.set(nl.bounds.x0, nl.bounds.y0) }
 }
 function tileMaterial(m) {
   const mat = new THREE.MeshStandardMaterial({ map: m.map || null, roughness: 1, metalness: 0 })
@@ -145,11 +178,8 @@ export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
     state, tiles,
     update() { if (!state.failed) { tiles.update(); updateCredit() } },
     resize() { if (!state.failed) tiles.setResolutionFromRenderer(camera, renderer) },
-    // the city lights: the Black Marble map (null until it loads), their strength (sky.js: CITY / exposure) and the
-    // real sun's direction (ECEF, unit; never the moon's) that gates them
     // the detail, kept within DETAIL_MIN..DETAIL_MAX (a lower error target loads finer tiles)
     setDetail(et) { state.errorTarget = tiles.errorTarget = Math.min(DETAIL_MAX, Math.max(DETAIL_MIN, et)) },
-    setNight(map, k, sunDir, lightDir) { night.uNight.value = map; night.uNightK.value = map ? k : 0; night.uNightSun.value.copy(sunDir); night.uLightDir.value.copy(lightDir || sunDir) },
     // the height above the WGS84 ellipsoid: a ray down the ellipsoid's normal from TOP, so the height is TOP less the
     // distance to the first hit (null where nothing is loaded under it)
     heightAt(lat, lon) {
