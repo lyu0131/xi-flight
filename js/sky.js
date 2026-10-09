@@ -19,7 +19,7 @@
    It also captures the monitor for the seat's light (see capture(), at the end): SITE5.env, SITE5.envFreeze,
    SITE5.envClouds; SITE5.loaded(k) is the loading readout's tick. */
 import * as THREE from 'three'
-import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, HueSaturationEffect, Effect } from 'postprocessing'
+import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, HueSaturationEffect, Effect, BloomEffect } from 'postprocessing'
 import { AerialPerspectiveEffect, PrecomputedTexturesGenerator, getSunDirectionECEF, getMoonDirectionECEF,
   SunDirectionalLight, SkyLightProbe, SkyMaterial } from '@takram/three-atmosphere'
 import { CloudsEffect, CLOUD_SHAPE_TEXTURE_SIZE, CLOUD_SHAPE_DETAIL_TEXTURE_SIZE } from '@takram/three-clouds'
@@ -62,13 +62,14 @@ const scene = new THREE.Scene()
 // the Earth: the WGS84 ellipsoid (poles on z, longitude 0 on +x, as ECEF), lit by the sun or the moon through the
 // air (Takram's sun light and sky light probe), NASA's land and sea colour on it and its city lights glowing
 const earthGeo = new THREE.SphereGeometry(1, 720, 360); earthGeo.rotateX(Math.PI / 2)
+const EARTH_PUSH = 1.003   // (see below)
 const earthMat = new THREE.MeshStandardMaterial({ color: 0x24303c, roughness: 0.92, metalness: 0, emissive: 0x000000 })
 // its city lights are the tiles' (earth3d.js, nightLight()): the global map and the 500 m mosaic near the suit, each
 // faded by altitude, glowing only where it's dark on the ground (x 1 - smoothstep(-6, +2 deg) of the real sun's
 // elevation over each point, never the moon's), in earthMat.emissive x emissiveIntensity
 earthMat.onBeforeCompile = s => {
   Object.assign(s.uniforms, night)
-  s.vertexShader = 'varying vec3 vCityW;\n' + s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvCityW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
+  s.vertexShader = 'varying vec3 vCityW;\n' + s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvCityW = (modelMatrix * vec4(transformed, 1.0)).xyz;\ngl_Position = projectionMatrix * vec4(mvPosition.xyz * ' + EARTH_PUSH.toFixed(4) + ', 1.0);')
   s.fragmentShader = 'varying vec3 vCityW;\n' + NIGHT_GLSL + s.fragmentShader.replace('#include <emissivemap_fragment>',
     '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= nightLight(vCityW);')
 }
@@ -80,8 +81,10 @@ earthMat.onBeforeCompile = s => {
 const EARTH_DROP = 150; world.earthDrop = EARTH_DROP
 const earth = new THREE.Mesh(earthGeo, earthMat); earth.scale.set(6378137 - EARTH_DROP, 6378137 - EARTH_DROP, 6356752.314245 - EARTH_DROP); scene.add(earth)
 // (and pushed back in depth: far from the coast Google's ocean tiles are coarse flat chords that sag below it, so it
-// showed through them as a darker sea with a jagged edge, flickering where the two met; the bias lets the tiles win)
-earthMat.polygonOffset = true; earthMat.polygonOffsetFactor = 2; earthMat.polygonOffsetUnits = 2000
+// showed through them as a darker sea with a jagged edge, flickering where the two met; the push lets the tiles win.
+// It's EARTH_PUSH of its distance from the eye, in its vertex shader above. It was a polygon offset of 2000 units, which
+// put its depth at the far value: the air's effect took it for sky and left it unhazed (pale patches from orbit, dark
+// slabs along the horizon), and the stars shone through it in the monitor capture: owner 2026-10-09)
 const tex = (url, srgb, k, use) => new THREE.TextureLoader().load(url, t => {
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); use(t); loaded(k)
 }, undefined, () => loaded(k, "THE EARTH'S MAPS COULDN'T LOAD"))
@@ -113,6 +116,9 @@ world.tileset = earth3d ? earth3d.tiles : null   // (the TilesRenderer itself, f
 // spheres round the camera, behind the Earth). (The air's effect used to paint the sky itself, over every background
 // pixel, the stars included; and Takram's 'background' stars sat exactly on the far plane, all clipped: owner 2026-10-09.)
 const skyMat = new SkyMaterial(), skyQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), skyMat)
+// (the sun's disc: Takram's SkyMaterial starts its cosSunAngularRadius uniform at the radius itself, 0.0047, not its
+// cosine, so every sky pixel took the disc's branch; only the setter works the cosine out)
+skyMat.sunAngularRadius = skyMat.sunAngularRadius
 skyQuad.frustumCulled = false; skyQuad.renderOrder = -1; scene.add(skyQuad)
 const sky = makeStarSky({ scene, onLoad: () => loaded('stars') }); world.sky = sky.state
 
@@ -183,7 +189,11 @@ composer.addPass(new EffectPass(camera, ...(CLOUDS ? [clouds, ap] : [ap])))
 // the look: AgX, with its colour pushed back up (+0.3 saturation) at the day exposure of 6. (AgX alone at 10 greyed the
 // Earth out, 'gloom'; Khronos Neutral kept the colour but turned the haze and every dusk purple, owner 2026-10-09)
 const LOOK = () => [new ToneMappingEffect({ mode: ToneMappingMode.AGX }), new HueSaturationEffect({ hue: 0, saturation: 0.3 })]
-composer.addPass(new EffectPass(camera, ...LOOK()))
+// the sun's glare (owner 2026-10-09, "the glare from the daylight is messed up": the sun was a bare 2 px dot): a bloom
+// only what's GLARE_AT or brighter on the display goes into (the sun, sun glints; never the sky or the city lights),
+// its threshold moved with the exposure each frame
+const GLARE_AT = 20, glare = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 1, luminanceSmoothing: 0.2, intensity: 0.012, radius: 0.85 })
+composer.addPass(new EffectPass(camera, glare, ...LOOK()))
 composer.addPass(new EffectPass(camera, warp))
 // the capture's chain: the scene, the air and clouds, then (by hand, below) the same look into capRT. Never the composer's own
 // setSize: it resizes the renderer, i.e. the world canvas. Its buffers and passes are sized to 64 once, here.
@@ -295,6 +305,7 @@ S.renderers.push(function (pose, Wd, Hd) {
   expo = expo === null || (S.reduce && !(meterGoal && !byMoon)) ? goal : expo * Math.pow(goal / expo, Math.min(1, Math.max(0, now - lastT) / 3)); lastT = now
   const exposure = world.exposure = expo
   renderer.toneMappingExposure = exposure
+  glare.luminanceMaterial.threshold = GLARE_AT / exposure
   for (const o of [ap, clouds, sunLight, skyLight, skyMat]) o.sunDirection.copy(light)
   ap.moonDirection && ap.moonDirection.copy(moon); skyMat.moonDirection.copy(moon)
   sunLight.target.position.copy(P); sunLight.update(); skyLight.position.copy(P); skyLight.update()

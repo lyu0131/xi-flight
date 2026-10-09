@@ -123,7 +123,10 @@ function nightPatch(s) {
   s.fragmentShader = 'varying vec3 vNightW;\n' + NIGHT_GLSL + s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
     {
       float glat, glon; vec3 gUp = nightGeo(vNightW, glat, glon);
-      normal = normalize(mix((viewMatrix * vec4(gUp, 0.0)).xyz, normal, smoothstep(0.17, 0.34, dot(gUp, uLightDir))));
+      // (and by distance: far tiles are coarse, a few big flat chords, and their facets caught the sun as a patchwork of
+      // pink and blue blocks seen from orbit (owner 2026-10-09); past 30 km the relief fades into the smooth globe's
+      // shading, gone by 200 km, where it's below a pixel anyway)
+      normal = normalize(mix((viewMatrix * vec4(gUp, 0.0)).xyz, normal, smoothstep(0.17, 0.34, dot(gUp, uLightDir)) * (1.0 - smoothstep(30000.0, 200000.0, length(vViewPosition)))));
     }`).replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
     {
       float lat, lon; vec3 nUp = nightGeo(vNightW, lat, lon);

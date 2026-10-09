@@ -76,6 +76,13 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
   Earth hides them by a ray test on the ellipsoid (the flat Earth's depth offset put it level with them, so in the monitor
   capture they shone through it and held the night meter at a day exposure). Kept out of the capture (a star's light is
   set per pixel). Bright as seen at a night exposure (60) up, a tenth in daylight; credited on the credit line.
+- **Daylight** (owner 2026-10-09, "the glare from the daylight is messed up"): the sun's disc drew as a bare 2 px dot, so
+  it now has a glare: a bloom (`glare` in sky.js) only what's 20 or brighter on the display goes into, its threshold moved
+  with the exposure. The flat Earth is pushed back by 0.3% of its distance (`EARTH_PUSH`, in its vertex shader) instead
+  of a 2000-unit polygon offset, which had put its depth at the far value: the air's effect took it for sky and left it
+  unhazed (pale patches from orbit, dark slabs along the horizon). Tiles shade with the smooth globe's normal past 30 km
+  (fully by 200 km): their coarse facets caught the sun as a patchwork of blocks. Stars and the Milky Way are gone at a
+  day exposure. (SkyMaterial's cosSunAngularRadius uniform is set through its setter: it starts at the radius itself.)
 - **The 3D Earth's quality** (owner 2026-10-09, "make rendering a lot better"): the tile cache holds 1.2 GB (0.9 kept on
   a trim; the library's 0.4 GB filled at ~1300 tiles and stopped any finer one loading), the detail tunes between 2 and
   24 px (finer under 7.5 ms a frame, coarser over 12), tile photos get 8x anisotropic filtering. Mipmaps stay off (the

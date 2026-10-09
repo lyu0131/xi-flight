@@ -139,8 +139,8 @@ export function makeStarSky({ scene, base = 'assets/sky/', onLoad }) {
     update(date, camPos, exposure, altKm, up) {
       getECIToECEFRotationMatrix(date, eci)
       for (const o of objs) { o.setRotationFromMatrix(eci); o.position.copy(camPos) }
-      // as bright as they look from a night exposure (NIGHT_EXPO) up; in daylight a day exposure barely shows them
-      const k = Math.min(1, exposure / NIGHT_EXPO) / exposure, t = performance.now() / 1000
+      // as bright as they look from a night exposure (NIGHT_EXPO) up, fading out through the dusk exposures to none by day
+      const k = THREE.MathUtils.smoothstep(exposure, 12, NIGHT_EXPO) / exposure, t = performance.now() / 1000   // (k: none at a day exposure, 6)
       const air = 1 - THREE.MathUtils.smoothstep(altKm, 8, 20)
       for (const mt of [starMat, planetMat]) {
         const u = mt.uniforms; u.uK.value = STAR_K * k; u.uTime.value = t; u.uUp.value.copy(up); u.uExt.value = 0.12 * (1 - THREE.MathUtils.smoothstep(altKm, 2, 30))
