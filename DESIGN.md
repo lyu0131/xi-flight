@@ -22,8 +22,9 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   curvature; nothing is pre-curved.
 - **Flight, in km** (spec `docs/2026-10-07-flight-earth-design.md`): world frame x east, y up, z north; the suit
   flies along its nose, `pose.pos` = [x, alt, z], `pose.geo` = [lat, lon]. **Speed** (5x the real-scale range, owner
-  2026-10-08): the throttle sets it between `SPD_LO` 2.5 and `SPD_HI` 40 km/s (cruise 10 at the default throttle 0.2),
-  Shift adds `BOOST` 20. **Height**: starts at `ALT0` **400 km**, ceiling `ALT_HI` **1000 km**, floor `ALT_LO` 1 km or
+  2026-10-08): the throttle sets it between `SPD_LO` 0 and `SPD_HI` 40 km/s; the flight **starts standing still**, W to go
+  and S back down to a stop (owner, 2026-10-09; on a touch screen, with no W, it starts at 0.2, 8 km/s). W/S work in
+  every mode. Shift adds `BOOST` 20. **Height**: starts at `ALT0` **400 km**, ceiling `ALT_HI` **1000 km**, floor `ALT_LO` 1 km or
   0.3 km over loaded terrain (at a limit the climb is taken out). `?alt=` sets the start, `?seed=` the sky,
   `?traffic=0` empties it. The dogfight is gone (owner, 2026-10-07: "no shooting").
 - **Traffic** (`js/traffic.js`): seven aircraft round the suit (AIRLINER, FREIGHTER, BIZJET, BALLOON; generic, made-up
@@ -43,20 +44,15 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   the word reads MANUAL) and it hands back 4s after the last key, with the aim assist; **INPUT** is yours -- the keys
   only, no assist, and let go it holds heading and altitude (the pitch eases level). A switch takes effect at once.
   `pose.pilot` says who's flying (AUTO or MANUAL); the right ring's toggle follows it.
-- **Head**: drag (pointer events, so mouse and finger) turns it; it drifts back 3s after letting go. On top of that it
-  **leads every move** (0.3 x the turn rate, up to 24°; 0.42 x the climb rate, up to 20°) on a slightly bouncy spring,
+- **Head**: no looking round by dragging (taken out by the owner, 2026-10-09), and the cursor is hidden over the view
+  (`cursor: none` on `#cockpit`; the dock's buttons show it). The head **leads every move** (0.3 x the turn rate, up to 24°; 0.42 x the climb rate, up to 20°) on a slightly bouncy spring,
   and the **mouse steers the gaze** (up to 9° across, 6° up and down). The HUD is painted on the ball, so this is what
   moves it on screen: climb and the whole HUD drops, as in the FPV clip when the pilot looks up. Off under reduced
   motion. `SITE5.project(ballPoint)` gives a ball point's screen position (tests use it).
 - **Targeting**: the aircraft nearest the boresight, once within 4.5 deg (inside the
   sight), is held 0.5s to lock; the target is kept until it passes 7 deg or another sits 2.5 deg nearer, so the
   lock doesn't flicker. `pose.lockId` names it.
-- **Pause** (brief 2026-10-08): `P`, or the `#pause` button in the `#dock` (above `#time`, styled like MODE; it reads
-  `PAUSE` while flying, `RESUME` while paused). Paused, the flight stands still: the step runs with no time passing
-  (as under reduced motion), so no position, attitude, autopilot or throttle change, the traffic stops and `pose.t`
-  holds; the world clock holds too unless the time controller runs faster than x1 (then it still moves, by rate - 1).
-  Rendering, looking round (drag, right-drag, C; the head still drifts back on the wall clock), the HUD and the time
-  controller run on. `SITE5.pose.paused`. The hint says `P PAUSE`.
+- **No pause**: added 2026-10-08 (`P`, `#pause`), taken out again by the owner 2026-10-09.
 - `SITE5.pose` is the one per-frame snapshot both renderers read; `SITE5.renderers` are called in order.
 
 ## The picture (`js/sky.js`)
@@ -65,7 +61,9 @@ Takram's physical atmosphere and volumetric clouds, the library versions pinned 
 It runs over http only (`.claude/launch.json` `site5`, or the tests' own server) and needs the network.
 - **The Earth**: the WGS84 ellipsoid at real scale, NASA's land and sea colour and Black Marble city lights as emission (both in
   `assets/earth/`; if they can't load the readout says THE EARTH'S MAPS COULDN'T LOAD), lit through the air by the sun or the moon
-  (Takram's sun light and sky light probe). Stars from the Yale bright-star catalogue, turned with the Earth.
+  (Takram's sun light and sky light probe). Stars from the Yale bright-star catalogue, turned with the Earth: points on a sphere 5000 km round the camera
+  (Takram's 'background' stars sit exactly on the far plane, where all of them were clipped), over a `SkyMaterial`
+  backdrop (the air's effect no longer paints the sky, which covered them too).
 - **The 3D Earth** (`js/earth3d.js`, spec `docs/2026-10-08-photoreal-earth-design.md`): Google's Photorealistic 3D Tiles,
   streamed through Cesium ion (asset 2275207) by `3d-tiles-renderer`, in ECEF metres (the scene's own frame, so the tile group
   needs no transform). Only the main camera drives the level of detail (`errorTarget` 16). Each tile's material is a lit
@@ -140,7 +138,8 @@ within 2.5% of where that frame has them, on a 16:9 screen in the still (reduced
   same on both sides; the ticks are spaced to fit between the caps), salmon chevrons at +-26 pointing in.
 - **Side rings** at az +-90 and 180, centred on the rail: a 3.4 deg crosshair circle with radial ticks, a dotted ring (26), two dot grids. (Their ring of coffin cells was
   removed, owner 2026-10-07.)
-- **Element size**: everything is drawn at `SZ` = 0.75 of its measured size, in place (owner: too cluttered).
+- **Element size**: everything is drawn at `SZ` = 0.15 of its measured size, in place (owner: too cluttered at 1, then
+  0.75; 0.15 since 2026-10-09, the cockpit smaller against the world). The speed and position lines keep fixed gaps.
 - **The tall rulers**: full circles round a point off each side (az +-90, el -10, radius 48), through the measured
   ruler path, so they bow toward the middle and curve wherever you look; their dashes slide round with the
   suit's pitch (1.6 deg of arc per degree, a long one every fifth); a coffin column round the same centre just
@@ -269,7 +268,8 @@ capture -> PMREM -> glb atlas + lightmap -> bloom -> Neutral.
   near-miss flash. No sun, moon or key light: the sun's light is already in the picture.
 
 Only the head turning moves it. The pilot's body isn't drawn, so looking straight down shows the seat under where it would be. No tablets (no panels).
-Narrow screens draw the seat and rings closer (`KX`).
+Narrow screens draw the seat and rings closer (`KX`). The whole seat is drawn at `SEAT_K` 0.6, shrunk toward a
+point low in front (`PIV`), so it takes less of the view (owner, 2026-10-09).
 
 ## Palette (sampled off the clips)
 Lines `#AFC0EC` (mix) / `#9CB3E8` / `#BAC4F4`, white ticks `#EEF3FA`, mode word `#FFA3DC`, horizon bars `#FF4F8B` over
@@ -282,8 +282,8 @@ Three files in `tests/`, run from the repo root. They need only Node (22+) and, 
 since the site is http-only) come with them.
 - `node site5/tests/cockpit.test.js` (about 8 minutes, needs the network for the CDN libraries): the ball, the HUD
   and the world draw; AUTO flies and sways the seat; the hand rings open and close on strap-in and carry their own
-  controls; keys take over and hand back; drag turns the head; the three modes and the arcade keys; targeting and
-  locks; altitude limits; the rear HUD and looking down; the world's light, clouds and night cities, and a world that
+  controls; keys take over and hand back; a drag doesn't look round; it starts stopped and W/S go and stop; the three modes and the arcade keys; targeting and
+  locks; altitude limits; the seat at rest; the world's light, clouds and night cities, and a world that
   fails says so; the monitor capture (six 64² faces, day brighter than night); the seat's light (from seat.glb, noon
   brighter than night, its lit side follows the sun, warm at a sunset, a synthetic right-hand monitor lights the
   right-facing walls, dim but never black before a capture, a missing seat says so and the rings still draw); frame

@@ -7,8 +7,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--night); }
-#cockpit { position: fixed; inset: 0; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
-#cockpit:active { cursor: grabbing; }
+#cockpit { position: fixed; inset: 0; touch-action: none; cursor: none; user-select: none; -webkit-user-select: none; }
 #world, #hud, #seat { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #hud, #seat { pointer-events: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -23,11 +22,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--night)
 #loading { position: fixed; top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); margin: 0; z-index: 3;
   font: 10px/1 Michroma, 'B612 Mono', monospace; letter-spacing: .24em; color: #FFA3DC; opacity: .85; white-space: nowrap; pointer-events: none; }
 #loading[hidden] { display: none; }
-/* the mode switch and, stacked on it, the world clock and the pause: text in the hint's voice, no box, bottom left. The dock lets the
+/* the mode switch and, stacked on it, the world clock: text in the hint's voice, no box, bottom left. The dock lets the
    pointer through between them (only the buttons take it) and grows up as the mode wraps on a phone */
 #dock { position: fixed; left: max(16px, env(safe-area-inset-left)); bottom: max(40px, calc(env(safe-area-inset-bottom) + 26px)); z-index: 3;
   display: flex; flex-direction: column; align-items: flex-start; pointer-events: none; }
-#mode, #time, #pause { background: none; border: 0; padding: 8px 4px; color: #AFC0EC; font: 10px/1 Michroma, 'B612 Mono', monospace; letter-spacing: .18em;
+#mode, #time { background: none; border: 0; padding: 8px 4px; color: #AFC0EC; font: 10px/1 Michroma, 'B612 Mono', monospace; letter-spacing: .18em;
   opacity: .75; cursor: pointer; pointer-events: auto; text-align: left; }
 @media (max-width: 699px) { #hint .fine { display: none; } #hint .touch { display: inline; } #mode { max-width: calc(100vw - 32px); white-space: normal; text-align: left; line-height: 1.5; } }
 /* the tiles' credit (Google's terms): bottom right, quiet, wraps on a phone, never in the way */
@@ -37,7 +36,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--night)
 #attrib img { height: 14px; max-width: 100%; vertical-align: middle; }
 #attrib a { color: inherit; pointer-events: auto; }   /* (only the links take the mouse; the rest never steals the stick) */
 #mode.nudge { opacity: 1; color: #FFA3DC; }
-#mode:hover, #mode:focus-visible, #time:hover, #time:focus-visible, #pause:hover, #pause:focus-visible { opacity: 1; color: #FFA3DC; outline: 1px solid rgba(255, 163, 220, .5); outline-offset: 2px; }
+#mode:hover, #mode:focus-visible, #time:hover, #time:focus-visible { opacity: 1; color: #FFA3DC; outline: 1px solid rgba(255, 163, 220, .5); outline-offset: 2px; }
 @media (hover: none) { #hint .fine { display: none; } #hint .touch { display: inline; } }
 @keyframes hint { 0%, 100% { opacity: 0; } 12%, 70% { opacity: .7; } }
 

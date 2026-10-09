@@ -21,7 +21,7 @@
 import * as THREE from 'three'
 import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, HueSaturationEffect, Effect } from 'postprocessing'
 import { AerialPerspectiveEffect, PrecomputedTexturesGenerator, getSunDirectionECEF, getMoonDirectionECEF, getECIToECEFRotationMatrix,
-  SunDirectionalLight, SkyLightProbe, StarsGeometry, StarsMaterial, DEFAULT_STARS_DATA_URL } from '@takram/three-atmosphere'
+  SunDirectionalLight, SkyLightProbe, StarsGeometry, StarsMaterial, SkyMaterial, DEFAULT_STARS_DATA_URL } from '@takram/three-atmosphere'
 import { CloudsEffect, CLOUD_SHAPE_TEXTURE_SIZE, CLOUD_SHAPE_DETAIL_TEXTURE_SIZE } from '@takram/three-clouds'
 import { ArrayBufferLoader, DataTextureLoader, Ellipsoid, Geodetic, parseUint8Array, STBNLoader, DEFAULT_STBN_URL } from '@takram/three-geospatial'
 import { makeEarth3D, night, NIGHT_GLSL, setNight } from './earth3d.js'
@@ -107,10 +107,17 @@ const earth3d = TOKEN && qp.get('tiles') !== '0'
 if (earth3d && DETAIL) earth3d.setDetail(DETAIL)
 world.tiles = earth3d ? earth3d.state : { on: false, loaded: 0, failed: false }
 world.heightAt = earth3d ? earth3d.heightAt : () => null
-// the stars: points at infinity, turned with the Earth
-const starsMat = new StarsMaterial({ background: true }); starsMat.pointSize = 1.6
+// the sky, drawn as the scene's backdrop (a full-screen quad at infinity), and the stars over it: points at infinity,
+// turned with the Earth. (The air's effect used to paint the sky itself, over every background pixel. And the stars'
+// own 'background' mode puts each one exactly on the camera's far plane, where all of them were clipped: none ever
+// showed, owner 2026-10-09. So they're a sphere STARS_R round the camera instead: inside the far plane, behind the
+// Earth from any height up to the ceiling (the limb is under 3700 km away at 1000 km up), the air's haze over them.)
+const skyMat = new SkyMaterial(), skyQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), skyMat)
+skyQuad.frustumCulled = false; skyQuad.renderOrder = -1; scene.add(skyQuad)
+const starsMat = new StarsMaterial({ background: false }); starsMat.pointSize = 1.6
+const STARS_R = 5e6
 let stars = null
-new ArrayBufferLoader().load(DEFAULT_STARS_DATA_URL, data => { stars = new THREE.Points(new StarsGeometry(data), starsMat); scene.add(stars); loaded('stars') }, undefined, () => loaded('stars'))
+new ArrayBufferLoader().load(DEFAULT_STARS_DATA_URL, data => { stars = new THREE.Points(new StarsGeometry(data), starsMat); stars.scale.setScalar(STARS_R); stars.frustumCulled = false; scene.add(stars); loaded('stars') }, undefined, () => loaded('stars'))
 
 // the ball warp, last in the chain
 const WARP = `
@@ -135,7 +142,7 @@ const warp = new BallWarp()
 
 // the air over everything (light-source lighting: the scene is lit by the lights above, the effect adds the sky and
 // the air between), and the volumetric clouds composited into it
-const ap = new AerialPerspectiveEffect(camera); ap.sky = true
+const ap = new AerialPerspectiveEffect(camera)
 const clouds = new CloudsEffect(camera); clouds.coverage = 0.45; clouds.qualityPreset = 'high'
 clouds.events.addEventListener('change', e => {
   if (e.property === 'atmosphereOverlay') ap.overlay = clouds.atmosphereOverlay
@@ -150,7 +157,6 @@ const capCam = new THREE.PerspectiveCamera(90, 1, 10, 1e7)
 // and without them the ground below reads as grey haze instead of white cloud tops)
 S.envClouds = CAPTURE && CLOUDS
 const capAp = CAPTURE ? new AerialPerspectiveEffect(capCam) : null
-if (capAp) capAp.sky = true
 const capClouds = S.envClouds ? new CloudsEffect(capCam) : null
 if (capClouds) {
   capClouds.coverage = clouds.coverage; capClouds.qualityPreset = 'low'; capClouds.temporalUpscale = false
@@ -198,7 +204,7 @@ if (CAPTURE) {
   capRT = new THREE.WebGLRenderTarget(CS, CS, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace, depthBuffer: false })
 }
 const gen = new PrecomputedTexturesGenerator(renderer)
-for (const o of [starsMat, ...APS, ...CL]) Object.assign(o, gen.textures)
+for (const o of [skyMat, starsMat, ...APS, ...CL]) Object.assign(o, gen.textures)
 sunLight.transmittanceTexture = gen.textures.transmittanceTexture; skyLight.irradianceTexture = gen.textures.irradianceTexture
 let atmo = false
 gen.update().then(() => { atmo = true; loaded('atmosphere') }).catch(e => { console.error(e); atmo = true; loaded('atmosphere') })
@@ -250,7 +256,7 @@ addEventListener('keydown', e => {
 })
 if (timeBtn) timeBtn.addEventListener('click', () => setRate(RATES[(RATES.indexOf(world.time.rate) + 1) % RATES.length]))
 // the city lights and stars keep their apparent brightness whatever the exposure (CITY, STAR: at exposure 1)
-const CITY = 0.28, STAR = 1.4   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
+const CITY = 0.28, STAR = 1.6   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
 let expo = null, lastT = 0, meterGoal = 0, tilesAt = 0, capAt = 0
 // the meter: the capture's mean display brightness is held near METER (dim, as a dusk should look) by opening the
 // exposure from the day's DAY_EXPO up to EXPO_MAX; brighter than that (day, sunset) it stays at DAY_EXPO
@@ -277,9 +283,9 @@ S.renderers.push(function (pose, Wd, Hd) {
   // and the stars). Under the sun the monitor meters its own picture like a camera (see capture()): never below the
   // day's DAY_EXPO, opening up to EXPO_MAX as the twilight dims. The exposure eases over 3 s toward its goal.
   const now = performance.now() / 1000, r = world.time.rate
-  // (paused, as under reduced motion, pose.t stands still and only a rate over x1 moves the clock)
+  // (under reduced motion pose.t stands still and only a rate over x1 moves the clock)
   // (a frame's wall time is capped at 0.25 s, so a tab that was hidden doesn't jump the clock on its return)
-  offset += (S.reduce || pose.paused ? Math.max(0, r - 1) : r - 1) * Math.min(0.25, lastClock === null ? 0 : now - lastClock) * 1000; lastClock = now
+  offset += (S.reduce ? Math.max(0, r - 1) : r - 1) * Math.min(0.25, lastClock === null ? 0 : now - lastClock) * 1000; lastClock = now
   const date = world.time.date = new Date(START.getTime() + pose.t * 1000 + offset)
   showTime()
   getSunDirectionECEF(date, sun); getMoonDirectionECEF(date, moon)
@@ -292,15 +298,15 @@ S.renderers.push(function (pose, Wd, Hd) {
   expo = expo === null || (S.reduce && !(meterGoal && !byMoon)) ? goal : expo * Math.pow(goal / expo, Math.min(1, Math.max(0, now - lastT) / 3)); lastT = now
   const exposure = world.exposure = expo
   renderer.toneMappingExposure = exposure
-  for (const o of [ap, clouds, sunLight, skyLight, starsMat]) o.sunDirection.copy(light)
-  ap.moonDirection && ap.moonDirection.copy(moon)
+  for (const o of [ap, clouds, sunLight, skyLight, starsMat, skyMat]) o.sunDirection.copy(light)
+  ap.moonDirection && ap.moonDirection.copy(moon); skyMat.moonDirection.copy(moon)
   sunLight.target.position.copy(P); sunLight.update(); skyLight.position.copy(P); skyLight.update()
   earthMat.emissiveIntensity = CITY / exposure; starsMat.intensity = STAR / exposure
   const glow = world.nightGlow = { global: smoothstep(40, 60, pose.alt), near: nightLights ? smoothstep(8, 15, pose.alt) : 0 }
   if (nightLights) nightLights.update(pose.geo[0], pose.geo[1])
   // (the real sun gates the city lights, even while the moon lights the scene; the same lights on the tiles)
   setNight(cityMap, CITY / exposure, sun, light, glow, nightLights)
-  if (stars) { getECIToECEFRotationMatrix(date, eci); stars.setRotationFromMatrix(eci) }
+  if (stars) { getECIToECEFRotationMatrix(date, eci); stars.setRotationFromMatrix(eci); stars.position.copy(P) }
   const U_ = warp.uniforms
   U_.get('uEye').value.set(pose.eye[0], pose.eye[1], pose.eye[2]); U_.get('uEyeM').value.fromArray(mat(pose.eyeQ))
   U_.get('uTan').value.set(tx, ty); U_.get('uSrc').value.set(sx, sy)

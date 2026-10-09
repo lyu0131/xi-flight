@@ -4,11 +4,11 @@
    Frames are x right, y up, z forward; angles in degrees unless named *Rad.
    The suit flies in km over the Earth, among air traffic (traffic.js): on its own (AUTO) it cruises from one
    aircraft to the next, closing on each until it has held a lock a while. Arrows/WASD take it (MANUAL) and it
-   hands back 4s after the last key; dragging turns the pilot's head, which drifts back when let go.
+   hands back 4s after the last key.
    Controls, arcade style (owner, 2026-10-07): the mouse steers (its offset from the centre of the screen sets the
-   turn and climb, past a small dead zone), W/S set the throttle (it stays), Shift boosts while held, A/D bank into a
-   turn, Q/E yaw gently, the arrows are a stick too; a right-drag (or C held, or any drag on a touch screen) looks
-   round without steering.
+   turn and climb, past a small dead zone; the cursor is hidden over the view), W/S set the throttle (it stays; 0 is a
+   standstill, and the flight starts there), Shift boosts while held, A/D bank into a turn, Q/E yaw gently, the arrows
+   are a stick too. No looking round by dragging and no pause (owner, 2026-10-09).
    Three modes (M, or the MODE button): FREE watches (AUTO only, the keys don't fly), HYBRID shares (as above),
    INPUT is yours (the keys only; let go and it holds heading and altitude).
    The HUD is painted on the ball, so it only moves on screen when the eye moves against the ball. The
@@ -70,18 +70,17 @@
   var lat = LAT0, lon = LON0;
   var SEED = qs('seed', 1), TRAFFIC = qs('traffic', 1), ALT_LO = 1, ALT_HI = 1000, ALT0 = 400, tr = null, floor = ALT_LO, floorT = -1e9;   // low orbit's height by default, 1000 km the ceiling (owner, 2026-10-08)
   // speed: the throttle (0..1) sets it between SPD_LO and SPD_HI km/s; a boost adds BOOST while held; the actual
-  // speed follows on a lag. 5x the real-scale range since the owner asked, 2026-10-08: 2.5-40 km/s, cruise 10
-  // (throttle 0.2), boost +20. ?throttle= sets the start.
+  // speed follows on a lag. 0-40 km/s, boost +20; the flight starts standing still, W to go (owner, 2026-10-09).
+  // ?throttle= sets the start. (A touch screen has no W: there it starts at 0.2, 8 km/s.)
   // (chasing an aircraft the autopilot keeps the throttle's speed until it's close, then slows as it closes in:
   // (range - 8 km) x 0.4 a second (20 km: 4.8 km/s, 12 km: 1.6, 9 km: 0.5), never under CHASE_SPD nor over the
   // throttle's speed: the throttle's range, 5x the old one, raced past them
   // faster than a lock could hold, owner 2026-10-09 chose to slow it down for the chase)
-  var CHASE_SPD = 0.5, SPD_LO = 2.5, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', 0.2), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
-  var mouse = null, looking = false, DEAD = 0.08;   // the cursor (-1..1 from the centre, or null if not over the page)
+  var CHASE_SPD = 0.5, SPD_LO = 0, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', matchMedia('(hover: none)').matches ? 0.2 : 0), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
+  var mouse = null, DEAD = 0.08;   // the cursor (-1..1 from the centre, or null if not over the page)
   var yaw = { x: qs('hdg', 258), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
   var seat = [{ x: 0, v: 0 }, { x: 0, v: 0 }, { x: 0, v: 0 }];   // offset in the ball, in ball radii
   var seatRoll = { x: 0, v: 0 }, seatPitch = { x: 0, v: 0 };
-  var head = { yaw: 0, pitch: 0 }, lastDrag = -1e9, dragging = false;
   var lead = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } };   // the head looking into the move
   var gaze = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } }, gazeAt = [0, 0];   // the mouse, -1..1
   var keys = {}, lastKey = -1e9;
@@ -101,15 +100,6 @@
   S.setMode(mode);
   function nextMode() { S.setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]); }
   if (modeBtn) modeBtn.addEventListener('click', nextMode);
-  // the pause (P, or the PAUSE button): the flight stands still -- position, attitude, autopilot, traffic and pose.t --
-  // while the picture, looking round, the HUD and the time controller run on (the step runs with no time passing,
-  // as under reduced motion; sky.js holds the world clock unless its rate is over x1)
-  var paused = false, pauseBtn = document.getElementById('pause');
-  function togglePause() {
-    paused = !paused;
-    if (pauseBtn) { pauseBtn.textContent = paused ? 'RESUME' : 'PAUSE'; }
-  }
-  if (pauseBtn) pauseBtn.addEventListener('click', togglePause);
   var shake = 0, flash = 0, pos = [0, clamp(qs('alt', ALT0), ALT_LO, ALT_HI), 0], lockT = 0, locked = false, lockId = null;
   var ap = { id: null, held: 0, done: {}, alt: null };   // ...and the height it holds: where the pilot last left it   // the autopilot's current aircraft, how long it's held a lock on it, when each was done
   var LOCK_IN = 4.5, LOCK_OUT = 7, LOCK_TIME = 0.5;   // acquire inside the (small) triangle, release past it
@@ -129,59 +119,41 @@
   var cockpit = document.getElementById('cockpit');
   function keyRole(e) {
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    return { ArrowLeft: 'l', a: 'l', ArrowRight: 'r', d: 'r', ArrowUp: 'u', ArrowDown: 'd', q: 'ql', e: 'qr', w: 'tu', s: 'td', Shift: 'b', c: 'look' }[k] || null;
+    return { ArrowLeft: 'l', a: 'l', ArrowRight: 'r', d: 'r', ArrowUp: 'u', ArrowDown: 'd', q: 'ql', e: 'qr', w: 'tu', s: 'td', Shift: 'b' }[k] || null;
   }
   var FLY = { l: 1, r: 1, u: 1, d: 1, ql: 1, qr: 1 };   // the keys that steer (and so take over in HYBRID)
   addEventListener('keydown', function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'm' || e.key === 'M') { if (!e.repeat) nextMode(); e.preventDefault(); return; }
-    if (e.key === 'p' || e.key === 'P') { if (!e.repeat) togglePause(); e.preventDefault(); return; }
     var r = keyRole(e); if (!r) return;
-    if (r === 'look') { keys.look = true; e.preventDefault(); return; }
-    if (mode === 'FREE' && modeBtn) {   // the keys don't fly in FREE: say how to take the controls
+    if (mode === 'FREE' && FLY[r] && modeBtn) {   // the steering keys don't fly in FREE: say how to take the controls
       modeBtn.textContent = 'MODE: FREE · THE AUTOPILOT FLIES · PRESS M TO FLY'; modeBtn.classList.add('nudge');
       clearTimeout(nudgeT); nudgeT = setTimeout(function () { modeBtn.classList.remove('nudge'); showMode(); }, 3000);
     }
     keys[r] = true; if (FLY[r]) lastKey = performance.now(); e.preventDefault();
   });
   addEventListener('keyup', function (e) { var r = keyRole(e); if (r) keys[r] = false; });
-  addEventListener('blur', function () { keys = {}; dragging = false; });
-  var lx = 0, ly = 0;
-  cockpit.addEventListener('contextmenu', function (e) { e.preventDefault(); });   // the right button looks
+  addEventListener('blur', function () { keys = {}; });
   cockpit.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse') mouse = null; });
-  cockpit.addEventListener('pointerdown', function (e) {
-    if ((e.button !== 0 && e.button !== 2) || !e.isPrimary || (e.target.closest && e.target.closest('a, button'))) return;
-    dragging = true; lx = e.clientX; ly = e.clientY; lastDrag = performance.now();
-    cockpit.setPointerCapture && cockpit.setPointerCapture(e.pointerId);
-  });
   cockpit.addEventListener('pointermove', function (e) {
     if (e.pointerType === 'mouse') { gazeAt = [e.clientX / innerWidth * 2 - 1, e.clientY / innerHeight * 2 - 1]; mouse = gazeAt; }
-    if (keys.look && e.pointerType === 'mouse') {   // C held: the mouse looks
-      head.yaw = clamp(head.yaw - (e.movementX || 0) * 0.16, -150, 150); head.pitch = clamp(head.pitch + (e.movementY || 0) * 0.13, -70, 70);
-      lastDrag = performance.now();
-    }
-    if (!dragging || !e.isPrimary) return;
-    head.yaw = clamp(head.yaw - (e.clientX - lx) * 0.16, -150, 150);
-    head.pitch = clamp(head.pitch + (e.clientY - ly) * 0.13, -70, 70);
-    lx = e.clientX; ly = e.clientY; lastDrag = performance.now();
   });
-  ['pointerup', 'pointercancel'].forEach(function (t) { cockpit.addEventListener(t, function () { dragging = false; lastDrag = performance.now(); }); });
 
   // ---- one step of the simulation ----
-  function step(dt, now, dtLook) {   // (dtLook: the wall frame time, for the head drifting back; dt is 0 while paused)
-    // the mouse as a stick: its offset from the centre, past the dead zone; not while looking round
-    looking = dragging || !!keys.look;
+  function step(dt, now) {
+    // the mouse as a stick: its offset from the centre, past the dead zone
     var dz = function (v) { return Math.sign(v) * Math.max(0, Math.abs(v) - DEAD) / (1 - DEAD); };
-    var ms = mouse && !looking && mode !== 'FREE' ? [dz(mouse[0]), -dz(mouse[1])] : [0, 0];
+    var ms = mouse && mode !== 'FREE' ? [dz(mouse[0]), -dz(mouse[1])] : [0, 0];
     if (ms[0] || ms[1]) lastKey = now;
     var held_ = keys.l || keys.r || keys.u || keys.d || keys.ql || keys.qr || ms[0] || ms[1];
     var manual = mode === 'INPUT' || (mode === 'HYBRID' && (now - lastKey < 4000 || held_));
     if (manual) ap.alt = null;   // the autopilot picks up the height it's handed
-    // the throttle: W/S move it (0.5 a second) and it stays; Shift boosts; FREE leaves it alone
-    var boosting = mode !== 'FREE' && !!keys.b;
-    if (mode !== 'FREE') throttle = clamp(throttle + ((keys.tu ? 1 : 0) - (keys.td ? 1 : 0)) * 0.8 * dt, 0, 1);
+    // the throttle: W/S move it (0.8 a second) and it stays, in every mode (from a standstill even the autopilot needs
+    // it); Shift boosts
+    var boosting = !!keys.b;
+    throttle = clamp(throttle + ((keys.tu ? 1 : 0) - (keys.td ? 1 : 0)) * 0.8 * dt, 0, 1);
     var chasing = !manual && ap.id !== null, cruise = SPD_LO + throttle * (SPD_HI - SPD_LO) + (boosting ? BOOST : 0);   // (the autopilot has an aircraft: it slows for the chase, then runs back up)
-    if (!reduce) speed += ((chasing ? clamp((ap.range - 8) * 0.4, CHASE_SPD, cruise) : cruise) - speed) * Math.min(1, dt * 1.2);
+    if (!reduce) speed += ((chasing ? Math.min(cruise, Math.max(CHASE_SPD, (ap.range - 8) * 0.4)) : cruise) - speed) * Math.min(1, dt * 1.2);
     if (!reduce) T += dt;
     // the traffic round the suit, as seen from it (still under reduced motion)
     tr = tr || (S.makeTraffic && S.makeTraffic(SEED, { near: qs('near', 0) > 0 }));
@@ -234,7 +206,7 @@
     suitQ = euler(yaw.x, pitch.x, bank.x);
     // the floor: 0.3 km over the 3D Earth's terrain where it's loaded (sampled every 0.5 s, here and 0.5 s ahead), never under ALT_LO
     // (only below 15 km: no ground stands above ~9 km, so higher up there's nothing to clear and no need to ask)
-    if (!paused && now - floorT > 500 && S.world && S.world.heightAt && pos[1] < 15) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
+    if (now - floorT > 500 && S.world && S.world.heightAt && pos[1] < 15) { floorT = now; var h = S.world.heightAt(lat, lon), fw = dir(yaw.x, pitch.x), la = clamp(lat + fw[2] * speed * 0.5 / KM_DEG, -89.9, 89.9), g2 = S.world.heightAt(la, lon + fw[0] * speed * 0.5 / (KM_DEG * Math.cos(la * D)));   // (and the point 0.5 s ahead along the flight path: the higher of the two, so a ridge at boost speed is cleared before it's reached)
       var g = h === null ? g2 : g2 === null ? h : Math.max(h, g2); floor = g === null ? ALT_LO : Math.max(ALT_LO, g / 1000 + 0.3); }
     // flying forward, in km: the flight path is the nose; at the floor or the ceiling the climb is taken out
     if (!reduce) {
@@ -252,15 +224,13 @@
       spring(seat[0], ax, 5.5, 0.38, dt); spring(seat[1], ay, 5.5, 0.38, dt); spring(seat[2], 0, 5.5, 0.45, dt);
       spring(seatRoll, -bank.v * 0.05 * FLOAT, 6, 0.4, dt); spring(seatPitch, -pitch.v * 0.03 * FLOAT, 6, 0.4, dt);
     }
-    // the head drifts back to the nose once let go
-    if (!dragging && now - lastDrag > 3000) { var k = Math.min(1, dtLook * 1.6); head.yaw -= head.yaw * k; head.pitch -= head.pitch * k; }
     // it leads the move (a third of the turn rate, a little under half the climb rate), and follows the mouse
     if (!reduce) {
       spring(lead.yaw, clamp(yaw.v * 0.3, -24, 24) * FLOAT, 4.2, 0.5, dt); spring(lead.pitch, clamp(pitch.v * 0.42, -20, 20) * FLOAT, 4.2, 0.5, dt);
-      spring(gaze.yaw, dragging ? gaze.yaw.x : gazeAt[0] * 9, 3, 0.8, dt); spring(gaze.pitch, dragging ? gaze.pitch.x : -gazeAt[1] * 6, 3, 0.8, dt);
+      spring(gaze.yaw, gazeAt[0] * 9, 3, 0.8, dt); spring(gaze.pitch, -gazeAt[1] * 6, 3, 0.8, dt);
     }
     // the pilot's resting gaze is the nose itself: the triangle sight is right in front of the eyes
-    var view = { yaw: head.yaw + lead.yaw.x + gaze.yaw.x, pitch: head.pitch + lead.pitch.x + gaze.pitch.x };
+    var view = { yaw: lead.yaw.x + gaze.yaw.x, pitch: lead.pitch.x + gaze.pitch.x };
 
     // Targeting: the contact nearest the boresight, once inside LOCK_IN, is held for LOCK_TIME to lock. The
     // current target is kept until it drifts past LOCK_OUT (or another sits clearly nearer), so the lock never
@@ -282,7 +252,7 @@
       suitQ: suitQ, contacts: contacts, eye: eye, eyeQ: qmul(seatQ, euler(view.yaw, view.pitch, 0)),
       heading: ((yaw.x % 360) + 360) % 360, pitch: pitch.x, flash: flash, pos: pos.slice(), alt: pos[1], speed: speed, geo: [lat, lon], throttle: throttle, boost: boosting,
       locked: locked, lockT: lockT, lockId: lockId, pilot: manual ? 'MANUAL' : 'AUTO', chasing: chasing, mode: mode,
-      modeWord: mode === 'HYBRID' ? (manual ? 'MANUAL' : 'HYBRID') : mode, head: view, t: T, paused: paused,
+      modeWord: mode === 'HYBRID' ? (manual ? 'MANUAL' : 'HYBRID') : mode, head: view, t: T,
       stick: [clamp(yaw.v / 55, -1, 1), clamp(pitch.v / 40, -1, 1)]   // the grips' deflection: turn (+ right), climb (+ up)
     };
   }
@@ -303,7 +273,7 @@
     var dt = last == null ? 1 / 60 : Math.min(0.05, (now - last) / 1000);
     if (last != null) avg += ((now - last) - avg) * 0.05;
     last = now;
-    step(paused ? 0 : dt, now, dt);
+    step(dt, now);
     var W = innerWidth, H = innerHeight;
     S.cam = camera(W, H); S.frameMs = avg;
     S.renderers.forEach(function (r) { r(S.pose, W, H); });

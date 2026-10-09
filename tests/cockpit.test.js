@@ -1,5 +1,5 @@
 // site5 checks, on the headless-Chrome harness (tests/cdp.js, a copy of site4's): the ball renders, the HUD draws, the scripted flight
-// moves the suit and the seat, keys take it over and it hands back, drag turns the head, reduced motion
+// moves the suit and the seat, keys take it over and it hands back, a drag doesn't look round, reduced motion
 // holds still, every look loads, it fits a phone. Run: node site5/tests/cockpit.test.js
 const { launch: launchFile, check } = require('./cdp');
 const serve = require('./serve');
@@ -23,7 +23,7 @@ async function launch(o) {
 }
 // the airways' height, at the lowest throttle, for the targeting checks -- with the 3D tiles off: streaming them low
 // over the ground jitters the frame timing these lock-and-hold checks measure (the 3D Earth has its own block)
-const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0&hdg=0&tiles=0';
+const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0.0625&hdg=0&tiles=0';
 // a read inside a frame that can't hang the run: if no frame comes within 3 s, or the read throws, it gives `none`
 const inFrame = (p, body, none) => Promise.race([p.eval(`new Promise(r => requestAnimationFrame(() => { ${body} }))`),
   new Promise(r => setTimeout(() => r(none), 3000))]).then(v => v == null ? none : v);
@@ -240,23 +240,19 @@ async function ready(p) {
   const l0 = await lit(); await p.sleep(400);
   check('the coffin glow moves from cell to cell', (await lit()) !== l0 && (await lit()) !== undefined, l0 + ' -> ' + (await lit()));
 
-  // a drag turns the pilot's head, not the suit
-  await p.mouse('mousePressed', 700, 450, 1); for (let k = 1; k <= 8; k++) await p.mouse('mouseMoved', 700 - 25 * k, 450, 1); await p.mouse('mouseReleased', 500, 450);
-  check('a drag turns the head', Math.abs(await pose(p, 's.head.yaw')) > 20, String(await pose(p, 's.head.yaw')));
-  // looking round to the tail: the rail runs on behind the seat too
+  // no looking round by dragging (owner, 2026-10-09): a drag leaves the head where the gaze has it
   await p.mouse('mousePressed', 700, 450, 1); for (let k = 1; k <= 8; k++) await p.mouse('mouseMoved', 700 - 75 * k, 450, 1); await p.mouse('mouseReleased', 100, 450);
-  await p.sleep(200);
-  check('the rear of the monitor has its own HUD', await p.eval('SITE5.parts.rear === true'));
-  // looking down (dragging the view up): the arm rails and grips are there, drawn in perspective
-  await p.goto(PAGE, 300); await ready(p);
-  await p.mouse('mousePressed', 700, 650, 1); for (let k = 1; k <= 8; k++) await p.mouse('mouseMoved', 700, 650 - 40 * k, 1); await p.mouse('mouseReleased', 700, 330);
-  await p.sleep(200);
-  check('looking down shows the controls', await p.eval('SITE5.parts.seat.grip > 4 && SITE5.parts.seat.rail > 4'), JSON.stringify(await p.eval('SITE5.parts.seat')));
-  // the seat is a real 3D model on its own canvas: looking down, it fills a good part of the view, and its contact
+  await p.mouse('mouseMoved', 720, 450); await p.sleep(1500);
+  check('a drag no longer turns the head', Math.abs(await pose(p, 's.head.yaw')) < 12, String(await pose(p, 's.head.yaw')));
+  check('the cursor is hidden over the view', (await p.eval('getComputedStyle(document.getElementById("cockpit")).cursor')) === 'none');
+  // the controls are there at rest, low in the view (the seat drawn smaller, owner 2026-10-09)
+  await p.goto(PAGE, 300); await ready(p); await p.sleep(300);
+  check('the controls show at rest', await p.eval('SITE5.parts.seat.grip > 4'), JSON.stringify(await p.eval('SITE5.parts.seat')));
+  // the seat is a real 3D model on its own canvas: it takes a part of the view, low down, and its contact
   // shading (worked out after load) is in
   const seatCover = await inFrame(p, ` const g = SITE5.seatGL, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
     g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 3; i < px.length; i += 4 * 16) if (px[i] > 0) n++; r(n / (px.length / 64)); `, NaN);
-  check('looking down, the 3D seat fills a good part of the view', seatCover > 0.15, (seatCover * 100).toFixed(0) + '%');
+  check('the 3D seat takes a part of the view', seatCover > 0.03 && seatCover < 0.3, (seatCover * 100).toFixed(0) + '%');
   check('the seat contact shading is in', await p.eval('SITE5.parts.seatAO === true'));
   check('no JS errors', p.errors.length === 0, p.errors.join(' | '));
   check('frames hold up (avg under 25ms)', (await p.eval('SITE5.frameMs')) < 25, (await p.eval('SITE5.frameMs')).toFixed(1) + 'ms');
@@ -279,15 +275,15 @@ async function ready(p) {
     await a.goto('../site5/index.html?seed=7&mode=hybrid&alt=1.2', 300); await ready(a); await hold('ArrowDown', 'ArrowDown', 40, 3000);
     const lo = await pose(a, 's.alt');
     check('the floor and ceiling hold', Number.isFinite(hi) && hi <= 1000 && Number.isFinite(lo) && lo >= 1, JSON.stringify([hi, lo]));
-    // on the real globe: cruise is 10 km/s; north raises the latitude by the distance over 111.2 km a degree; the date line wraps
-    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&hdg=0&alt=18', 300); await ready(a);
+    // on the real globe: at throttle 0.25 it flies 10 km/s; north raises the latitude by the distance over 111.2 km a degree; the date line wraps
+    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&hdg=0&alt=18&throttle=0.25', 300); await ready(a);
     const q0 = JSON.parse(await pose(a, 'JSON.stringify(s.pos)')), g0 = JSON.parse(await pose(a, 'JSON.stringify(s.geo)')); await a.sleep(2000);
     const q1 = JSON.parse(await pose(a, 'JSON.stringify(s.pos)')); const mv = Math.hypot(q1[0] - q0[0], q1[2] - q0[2]);
-    check('the suit cruises at 10 km/s', mv > 17 && mv < 23, mv.toFixed(2) + ' km in 2s');
+    check('throttle 0.25 flies 10 km/s', mv > 17 && mv < 23, mv.toFixed(2) + ' km in 2s');
     await a.sleep(8000); const g1 = JSON.parse(await pose(a, 'JSON.stringify(s.geo)')), north = (g1[0] - g0[0]) * 111.2;
     const flown = Math.hypot(...[0, 2].map(i => JSON.parse(JSON.stringify(q1))[i]));
     check('north raises the latitude', north > 85 && north < 115 && Math.abs(g1[1] - g0[1]) < 0.01, JSON.stringify({ g0, g1, north }));
-    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&lon=179.99&hdg=90&alt=18', 300); await ready(a); await a.sleep(3000);
+    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&lon=179.99&hdg=90&alt=18&throttle=0.25', 300); await ready(a); await a.sleep(3000);
     const gd = JSON.parse(await pose(a, 'JSON.stringify(s.geo)'));
     check('the date line wraps', Number.isFinite(gd[1]) && gd[1] > -180 && gd[1] < -170, JSON.stringify(gd));   // (crossed east into the -180.. side; how far depends on how long the page took to load)
     await a.goto(PAGE + '&traffic=0', 300); await ready(a); await a.sleep(2000);
@@ -304,7 +300,7 @@ async function ready(p) {
     // and runs back up to the throttle's speed when it has none
     await q.goto('../site5/index.html?seed=7&mode=free&alt=11&hdg=0&throttle=0.5&tiles=0&nightlights=0', 300); await ready(q);
     for (let i = 0; i < 100 && !(await q.eval('SITE5.pose.chasing')); i++) await q.sleep(100);
-    await q.sleep(4000);
+    await q.sleep(2500);
     const chase = JSON.parse(await q.eval('JSON.stringify({ chasing: SITE5.pose.chasing, speed: SITE5.pose.speed })'));
     check('chasing an aircraft the autopilot slows right down', chase.chasing === true && chase.speed < 15, JSON.stringify(chase));   // (from 21 km/s at half throttle: (range - 8) x 0.4 once close)
     const left = on => key(on ? 'keyDown' : 'keyUp', 'ArrowLeft', 'ArrowLeft', 37);
@@ -362,7 +358,7 @@ async function ready(p) {
     const key = (type, kk, code, vk, mods) => k.send('Input.dispatchKeyEvent', { type, key: kk, code, windowsVirtualKeyCode: vk, modifiers: mods || 0 });
     const hold = async (kk, code, vk, ms, mods) => { await key('keyDown', kk, code, vk, mods); await k.sleep(ms); await key('keyUp', kk, code, vk, mods); };
     const turned = h0 => pose(k, 's.heading').then(h => ((h - h0 + 540) % 360) - 180);
-    await k.goto('../site5/index.html?seed=7&mode=input&alt=18', 300); await ready(k); await k.sleep(500);
+    await k.goto('../site5/index.html?seed=7&mode=input&alt=18&throttle=0.2', 300); await ready(k); await k.sleep(500);
     const sp0 = await pose(k, 's.speed');
     await hold('w', 'KeyW', 87, 1200);
     const spUp = await pose(k, 's.speed'); await k.sleep(1000); const spKept = await pose(k, 's.speed');
@@ -384,14 +380,6 @@ async function ready(p) {
     const right = await turned(h0);
     await k.mouse('mouseMoved', 600, 350); await k.sleep(800);
     check('the mouse steers: centre holds, right turns right', still < 2 && right > 20, JSON.stringify({ still, right }));
-    // a right-drag looks round without steering
-    h0 = await pose(k, 's.heading');
-    await k.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 600, y: 350, button: 'right', buttons: 2, clickCount: 1 });
-    for (let i = 1; i <= 10; i++) await k.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 600 + i * 45, y: 350, button: 'right', buttons: 2 });
-    const look = await pose(k, 's.head.yaw'), during = Math.abs(await turned(h0));
-    await k.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 1050, y: 350, button: 'right', buttons: 0, clickCount: 1 });
-    await k.mouse('mouseMoved', 600, 350);
-    check('a right-drag looks without steering', Math.abs(look) > 20 && during < 3, JSON.stringify({ look, during }));
     h0 = await pose(k, 's.heading'); await hold('d', 'KeyD', 68, 1000); const dTurn = await turned(h0);
     await k.sleep(600); h0 = await pose(k, 's.heading'); await hold('e', 'KeyE', 69, 1000); const eTurn = await turned(h0);
     check('D banks into a right turn, E yaws right more gently', dTurn > 30 && eTurn > 8 && eTurn < dTurn, JSON.stringify({ dTurn, eTurn }));
@@ -399,7 +387,14 @@ async function ready(p) {
     await k.mouse('mouseMoved', 1150, 350); let auto = true;
     for (let i = 0; i < 8; i++) { await k.sleep(100); if ((await pose(k, 's.pilot')) !== 'AUTO') auto = false; }
     const thr0 = await pose(k, 's.throttle'); await hold('w', 'KeyW', 87, 600);
-    check('FREE: the mouse and throttle do nothing', auto && (await pose(k, 's.throttle')) === thr0, JSON.stringify({ auto, thr0 }));
+    check('FREE: the mouse does nothing, W still sets the throttle', auto && (await pose(k, 's.throttle')) > thr0, JSON.stringify({ auto, thr0 }));
+    // the flight starts standing still; W takes it up from 0 and S back down to a stop (owner, 2026-10-09)
+    await k.goto('../site5/index.html?seed=7&mode=input&alt=18&tiles=0', 300); await ready(k); await k.sleep(800);
+    const sp00 = await pose(k, 's.speed'), g00 = await pose(k, 'JSON.stringify(s.geo)'); await k.sleep(1000);
+    const still0 = (await pose(k, 'JSON.stringify(s.geo)')) === g00;
+    await hold('w', 'KeyW', 87, 500); await k.sleep(1500); const spGo = await pose(k, 's.speed');
+    await hold('s', 'KeyS', 83, 1500); await k.sleep(4000); const spStop = await pose(k, 's.speed');
+    check('it starts stopped, W goes, S stops it', sp00 === 0 && still0 && spGo > 5 && spStop < 0.05, JSON.stringify({ sp00, still0, spGo, spStop }));
     {   // 5x faster (owner, 2026-10-08): full throttle is 40 km/s
       const p = k;
       await p.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(p); await p.sleep(5000);
@@ -452,13 +447,8 @@ async function ready(p) {
     const hudA = (x, y) => v.eval(`(() => { const c = document.getElementById('hud'), k = c.width / innerWidth; return c.getContext('2d').getImageData(Math.round(${x} * k), Math.round(${y} * k), 1, 1).data[3]; })()`);
     const onSeam = sp && await hudA(sp.sm[0], sp.sm[1]), inPanel = sp && await hudA(sp.sa[0], sp.sa[1]);
     check('the seams draw', !!sp && onSeam > inPanel + 25, JSON.stringify({ onSeam, inPanel }));
-    await v.mouse('mousePressed', 700, 400, 1); for (let k = 1; k <= 20; k++) await v.mouse('mouseMoved', 700 - 50 * k, 400, 1);
-    await v.sleep(300);
     // (at dusk much of the view is truly black, so these check the warp reaches inside the picture, not brightness)
     const inPic = uv => !!uv && uv[0] >= 0 && uv[0] <= 1 && uv[1] >= 0 && uv[1] <= 1;
-    const back = JSON.parse(await v.eval('JSON.stringify([SITE5.warp(innerWidth / 2, innerHeight / 2), SITE5.warp(5, 5), SITE5.warp(innerWidth - 5, innerHeight - 5)])'));
-    await v.mouse('mouseReleased', 0, 400);
-    check('looking back still shows the world', back.every(inPic) && Math.abs(await pose(v, 's.head.yaw')) > 120, JSON.stringify(back));
     await v.size(375, 812); await v.sleep(1500);
     const corners = JSON.parse(await v.eval('JSON.stringify([[5, 5], [370, 5], [5, 807], [370, 807]].map(([x, y]) => SITE5.warp(x, y)))'));
     check('a resize keeps the picture filling the screen', corners.every(inPic) && (await v.eval('SITE5.world.camera.aspect')) < 1, JSON.stringify(corners));
@@ -502,11 +492,9 @@ async function ready(p) {
     check('deep twilight is visible, not black: the monitor opens up', dim > 0.05, (dim * 100).toFixed(1) + '% mean, exposure ' + (await v.eval('SITE5.world.exposure')).toFixed(0));
     await v.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&alt=18&time=2026-10-08T22:00:00Z', 300); await ready(v);
     await v.sleep(2500);
-    await v.mouse('mousePressed', 720, 760, 1); for (let y = 760; y >= 300; y -= 20) await v.mouse('mouseMoved', 720, y, 1);
     await v.sleep(1500);
     const warm = await inFrame(v, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
       g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
-    await v.mouse('mouseReleased', 720, 300);
     check('a moonless night still shows the cities', warm > 0.002, (warm * 100).toFixed(2) + '% warm');
     // city lights only where it's dark on the ground (the sun's elevation there, -6..+2 deg)
     await v.goto('../site5/index.html?seed=7&lat=40.85&lon=14.27&alt=10&time=2026-10-08T11:00:00Z', 300); await ready(v); await v.sleep(1500);
@@ -543,7 +531,7 @@ async function ready(p) {
       const et = await t.eval('SITE5.world.tiles.errorTarget');
       check('the 3D detail tunes itself to the machine (finer on fast frames, never past 5)', et < 8 && et >= 5, String(et));
       // low down over the Alps (where the terrain floor asks for the ground's height) the flight and the tiles run on
-      await t.goto('../site5/index.html?seed=7&throttle=0&mode=input&lat=45.9&lon=7.0&hdg=60&alt=12&time=2026-10-08T11:00:00Z', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&throttle=0.0625&mode=input&lat=45.9&lon=7.0&hdg=60&alt=12&time=2026-10-08T11:00:00Z', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
       const low = JSON.parse(await t.eval('JSON.stringify({ alt: SITE5.pose.alt, f: SITE5.frames, tiles: SITE5.world.tiles.loaded })')); await t.sleep(2000);
       const low2 = await t.eval('SITE5.frames');
@@ -552,7 +540,7 @@ async function ready(p) {
       // tiles' steep faces mustn't catch it (they showed as pink-white streaks, 151 of these slivers before the fix).
       // Counted on the world's canvas alone (no HUD, no seat): a bright pixel standing well above both its neighbours.
       // (?nightlights=0: the 500 m city lights are sharp bright points by design, and this counter takes them for slivers)
-      await t.goto('../site5/index.html?seed=7&alt=80&throttle=0&mode=input&nightlights=0', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&alt=80&throttle=0.0625&mode=input&nightlights=0', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
       await t.sleep(6000);
       const slivers = await inFrame(t, `const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
@@ -567,25 +555,24 @@ async function ready(p) {
       for (let i = 0; i < 120 && !((await t.eval('SITE5.world.heightAt(45.8326, 6.8652)')) > 3500); i++) await t.sleep(250);
       const mb = await t.eval('SITE5.world.heightAt(45.8326, 6.8652)');
       check('it\'s 3D: Mont Blanc stands over 3500 m', mb > 3500, String(mb));
-      await t.goto('../site5/index.html?seed=7&lat=45.8326&lon=6.8652&alt=1&hdg=0&throttle=0&time=2026-10-08T11:00:00Z', 300); await ready(t); await t.sleep(6000);
+      await t.goto('../site5/index.html?seed=7&lat=45.8326&lon=6.8652&alt=1&hdg=0&throttle=0.0625&time=2026-10-08T11:00:00Z', 300); await ready(t); await t.sleep(6000);
       const alt = await t.eval('SITE5.pose.alt'), ground = await t.eval('SITE5.world.heightAt(SITE5.pose.geo[0], SITE5.pose.geo[1])');
       check('the suit stays above the mountains (floor = terrain + 0.3 km)', ground === null || alt >= ground / 1000 + 0.29, alt.toFixed(2) + ' km over ' + ground);
       // (idle throttle and a prompt look: at 5x speed a long wait carries the suit out over the dark sea)
       // (16 km, not 10: since the night lights fade by altitude (brief 2026-10-08) the 500 m mosaic is the only glow
       // there, at full strength, and it fades out below ~10 km: wait for it too)
-      await t.goto('../site5/index.html?seed=7&traffic=0&mode=input&throttle=0&lat=40.85&lon=14.27&alt=16&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&traffic=0&mode=input&throttle=0.0625&lat=40.85&lon=14.27&alt=16&time=2026-10-08T22:00:00Z', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20 && SITE5.world.nightTiles.loaded > 100')); i++) await t.sleep(250);
-      await t.mouse('mousePressed', 640, 700, 1); for (let y = 700; y >= 250; y -= 20) await t.mouse('mouseMoved', 640, y, 1); await t.sleep(2500);
+      await t.sleep(2500);
       const warm = await inFrame(t, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
         g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
-      await t.mouse('mouseReleased', 640, 250);
-      check('the cities glow on the 3D Earth at night', warm > 0.2, (warm * 100).toFixed(2) + '% warm ' + await t.eval('JSON.stringify({ glow: SITE5.world.nightGlow, nt: SITE5.world.nightTiles, alt: SITE5.pose.alt, expo: SITE5.world.exposure })'));
+      check('the cities glow on the 3D Earth at night', warm > 0.02, (warm * 100).toFixed(2) + '% warm ' + await t.eval('JSON.stringify({ glow: SITE5.world.nightGlow, nt: SITE5.world.nightTiles, alt: SITE5.pose.alt, expo: SITE5.world.exposure })'));
       // the night lights by altitude (brief 2026-10-08): the coarse 3 km glow fades out low down; a 500 m mosaic streams in
-      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0&alt=5&lat=42.6&lon=11.2&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.0625&alt=5&lat=42.6&lon=11.2&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
       check('low down the coarse 3 km city glow is gone', (await t.eval('SITE5.world.nightGlow.global')) === 0, JSON.stringify(await t.eval('SITE5.world.nightGlow')));
-      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.0625&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
       check('from 400 km the global city glow is full', (await t.eval('SITE5.world.nightGlow.global')) === 1);
-      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0&alt=60&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.0625&alt=60&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.nightTiles.loaded > 100')); i++) await t.sleep(250);
       check('the 500 m night-light mosaic streams in round the suit', (await t.eval('SITE5.world.nightTiles.loaded')) > 100, JSON.stringify(await t.eval('SITE5.world.nightTiles')));
       check('at 60 km the near night lights are on', (await t.eval('SITE5.world.nightGlow.near')) === 1);
@@ -649,7 +636,7 @@ async function ready(p) {
         if (x < w / 3) { s.nl++; s.l += L } else if (x > 2 * w / 3) { s.nr++; s.rr += L } }
       r({ n: s.n, lum: s.lum / s.n, r: s.r / s.n, b: s.b / s.n, left: s.l / s.nl, right: s.rr / s.nr }); `, { n: 0 })
       .then(st => { for (const f of ['lum', 'r', 'b', 'left', 'right']) if (typeof st[f] !== 'number') st[f] = NaN; return st; });   // (no seat pixels: NaN, so the checks FAIL)
-    const lookDown = async k => { await k.mouse('mousePressed', 700, 650, 1); for (let j = 1; j <= 8; j++) await k.mouse('mouseMoved', 700, 650 - 40 * j, 1); await k.mouse('mouseReleased', 700, 330); await k.sleep(1500); };
+    const lookDown = async k => { await k.sleep(1500); };   // (no looking round since 2026-10-09: the seat as it sits, low in the view)
     const at = async (q) => { await p.goto('../site5/index.html?seed=7&alt=18&' + q, 300); await ready(p); await lookDown(p); return seatStats(p); };
     check('the seat is on Three.js', await p.eval('SITE5.seat && SITE5.seat.ready === true && SITE5.seat.source === "glb"'));
     await p.goto(PAGE + '&seat=nope', 300); await ready(p); await p.sleep(2000);
@@ -658,18 +645,18 @@ async function ready(p) {
       await p.eval('document.getElementById("loading").textContent'));
     const noon = await at('hdg=90&time=2026-10-08T11:00:00Z'), late = await at('hdg=90&time=2026-10-08T22:00:00Z');
     check('the seat is lit by the monitor: noon at least 3x night', noon.lum > 3 * late.lum, noon.lum.toFixed(3) + ' vs ' + late.lum.toFixed(3));
-    // looking down, the left third is mostly the left armrest's inner walls (they face +x) and the right third the right
-    // one's (facing -x): a sun to the right lights the left third, a sun to the left the right third
+    // at rest (no looking down since 2026-10-09) the left third is mostly the left pod's outer flank (facing -x) and the
+    // right third the right one's (facing +x): a sun to the right lights the right third, a sun to the left the left
     const sunR = await at('hdg=224&time=2026-10-08T16:50:00Z'), sunL = await at('hdg=304&time=2026-10-08T16:50:00Z'), ratio = s => s.left / s.right;
-    check('the seat\'s lit side follows the sun on the monitor', ratio(sunR) > ratio(sunL), 'left/right ' + ratio(sunR).toFixed(3) + ' (sun right) vs ' + ratio(sunL).toFixed(3) + ' (sun left)');
+    check('the seat\'s lit side follows the sun on the monitor', ratio(sunR) < ratio(sunL), 'left/right ' + ratio(sunR).toFixed(3) + ' (sun right) vs ' + ratio(sunL).toFixed(3) + ' (sun left)');
     const dusk = await at('hdg=262&time=2026-10-08T16:50:00Z');
     check('facing a sunset the seat is warm', dusk.r > dusk.b, dusk.r.toFixed(3) + ' r vs ' + dusk.b.toFixed(3) + ' b');
     // orientation, with a synthetic monitor: only the seat's right (+x) face white
     await p.goto(PAGE, 300); await ready(p); await lookDown(p);
     await p.eval(`(() => { SITE5.envFreeze = true; const f = i => new Uint8Array(64 * 64 * 4).map((_, j) => j % 4 === 3 ? 255 : (i === 0 ? 255 : 0)); SITE5.env = { n: 1e6, size: 64, faces: [0, 1, 2, 3, 4, 5].map(f) }; })()`);
     await p.sleep(500); const side = await seatStats(p);
-    // (looking down, the left third is the left armrest's inner walls, which face +x)
-    check('a white right-hand monitor lights the surfaces facing right (the left armrest\'s inner walls)', side.left > 1.5 * side.right, side.left.toFixed(3) + ' vs ' + side.right.toFixed(3));
+    // (at rest the right third is the right pod's outer flank, which faces +x)
+    check('a white right-hand monitor lights the surfaces facing right (the right pod\'s flank)', side.right > 1.5 * side.left, side.left.toFixed(3) + ' vs ' + side.right.toFixed(3));
     // before any capture the seat is a dim grey, never black
     await p.goto(PAGE + '&capture=0', 300); await ready(p); await lookDown(p); const none = await seatStats(p);
     check('with no capture the seat still shows (dim, not black)', none.n > 1000 && none.lum > 0.01, JSON.stringify(none));
@@ -746,27 +733,13 @@ async function ready(p) {
     p.close();
   }
 
-  // the pause (brief 2026-10-08): P or #pause stops the flight; the picture, the look and the HUD run on
+  // no pause (owner, 2026-10-09: it was asked for, then taken out): P does nothing and there's no button
   if (want('pause')) {
     const p = await launch({ width: 1440, height: 900 });
-    await p.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(p);
-    const kp = async () => { for (const type of ['keyDown', 'keyUp']) await p.send('Input.dispatchKeyEvent', { type, key: 'p', code: 'KeyP', windowsVirtualKeyCode: 80 }); };
-    await kp(); await p.sleep(300); const g0 = await pose(p, 'JSON.stringify(s.geo)'), t0 = await pose(p, 's.t'); await p.sleep(2000);
-    check('P pauses the flight (position and clock hold)', (await pose(p, 'JSON.stringify(s.geo)')) === g0 && (await pose(p, 's.t')) === t0 && (await pose(p, 's.paused')) === true);
-    await kp(); await p.sleep(1500);
-    check('P again resumes', (await pose(p, 'JSON.stringify(s.geo)')) !== g0 && (await pose(p, 's.paused')) === false);
-    check('the pause button says what it does', /^(PAUSE|RESUME)$/.test(await p.eval('document.getElementById("pause").textContent.trim()')));
-    // (beyond the brief's checks: a click pauses, the world clock holds at x1 and runs at x60, and it fits a phone)
-    await p.eval('document.getElementById("pause").click()'); await p.sleep(200);
-    const d0 = await p.eval('SITE5.world.time.date.getTime()'); await p.sleep(1000); const d1 = await p.eval('SITE5.world.time.date.getTime()');
-    await p.eval('SITE5.world.time.rate = 60'); await p.sleep(1000); const d2 = await p.eval('SITE5.world.time.date.getTime()');
-    check('a click pauses and says RESUME; the clock holds at x1, a faster rate still runs', (await pose(p, 's.paused')) === true && (await p.eval('document.getElementById("pause").textContent')) === 'RESUME' && d1 === d0 && d2 - d1 > 30000,
-      JSON.stringify({ held: d1 - d0, ran: d2 - d1 }));
-    await p.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await p.sleep(800);
-    check('#pause sits clear of #time, #mode and #attrib at 375 px', await p.eval(`(() => { const e = document.getElementById("attrib"); if (!e.textContent) e.textContent = "Google; Data SIO, NOAA, U.S. Navy, NGA, GEBCO; IBCAO; Landsat / Copernicus · Airbus";
-      const r = id => document.getElementById(id).getBoundingClientRect(), t = r("pause"), hit = o => !(t.right <= o.left || o.right <= t.left || t.bottom <= o.top || o.bottom <= t.top);
-      return t.width > 0 && t.left >= 0 && t.right <= innerWidth && !hit(r("time")) && !hit(r("mode")) && !hit(r("attrib")) && document.documentElement.scrollWidth <= innerWidth; })()`),
-      await p.eval('JSON.stringify(["pause", "time", "mode", "attrib"].map(id => document.getElementById(id).getBoundingClientRect()))'));
+    await p.goto('../site5/index.html?seed=7&mode=input&throttle=1&tiles=0', 300); await ready(p);
+    for (const type of ['keyDown', 'keyUp']) await p.send('Input.dispatchKeyEvent', { type, key: 'p', code: 'KeyP', windowsVirtualKeyCode: 80 });
+    const g0 = await pose(p, 'JSON.stringify(s.geo)'); await p.sleep(1000);
+    check('P no longer pauses, and there is no pause button', (await pose(p, 'JSON.stringify(s.geo)')) !== g0 && !(await p.eval('document.getElementById("pause")')));
     check('pause: no JS errors', p.errors.length === 0, p.errors.join(' | '));
     p.close();
   }
@@ -779,9 +752,8 @@ async function ready(p) {
     check('phone: draws', await m.eval('!!SITE5.gl') && m.errors.length === 0, m.errors.join(' | '));
     const ed = await m.eval('JSON.stringify(SITE5.parts.cluster.edges)');
     check('phone: the whole cluster fits across the screen', JSON.parse(ed)[0] >= 4 && JSON.parse(ed)[1] <= 371, ed);
-    await m.mouse('mousePressed', 187, 650, 1); for (let k = 1; k <= 8; k++) await m.mouse('mouseMoved', 187, 650 - 40 * k, 1); await m.mouse('mouseReleased', 187, 330);
     await m.sleep(200);
-    check('phone: looking down shows the rails and grips', await m.eval('SITE5.parts.seat.grip > 4 && SITE5.parts.seat.rail > 4'), JSON.stringify(await m.eval('SITE5.parts.seat')));
+    check('phone: the grips show', await m.eval('SITE5.parts.seat.grip > 4'), JSON.stringify(await m.eval('SITE5.parts.seat')));
     // (a long credit is put in first, so an empty element can't pass: the tiles' own credit needs a key)
     check('phone: the attribution fits', await m.eval('(() => { const e = document.getElementById("attrib"); e.textContent = "Google; Data SIO, NOAA, U.S. Navy, NGA, GEBCO; IBCAO; Landsat / Copernicus · Airbus"; const a = e.getBoundingClientRect(); return a.width > 0 && a.right <= innerWidth && a.width < innerWidth; })()'));
     m.close();
