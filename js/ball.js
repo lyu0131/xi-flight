@@ -69,14 +69,18 @@
   var RE = S.RE = 6371, KM_DEG = RE * D;   // km of ground per degree of latitude
   var lat = LAT0, lon = LON0;
   var SEED = qs('seed', 1), TRAFFIC = qs('traffic', 1), ALT_LO = 1, ALT_HI = 1000, ALT0 = 400, tr = null, floor = ALT_LO, floorT = -1e9;   // low orbit's height by default, 1000 km the ceiling (owner, 2026-10-08)
-  // speed: the throttle (0..1) sets it between SPD_LO and SPD_HI km/s; a boost adds BOOST while held; the actual
+  // speed: the throttle (0..1) sets it, 0 to SPD_HI km/s on a cubic curve (below); a boost adds to it while held; the actual
   // speed follows on a lag. 0-40 km/s, boost +20; the flight starts standing still, W to go (owner, 2026-10-09).
-  // ?throttle= sets the start. (A touch screen has no W: there it starts at 0.2, 8 km/s.)
+  // ?throttle= sets the start. (A touch screen has no W: there it starts at 0.5, 5 km/s.)
   // (chasing an aircraft the autopilot keeps the throttle's speed until it's close, then slows as it closes in:
   // (range - 8 km) x 0.4 a second (20 km: 4.8 km/s, 12 km: 1.6, 9 km: 0.5), never under CHASE_SPD nor over the
   // throttle's speed: the throttle's range, 5x the old one, raced past them
   // faster than a lock could hold, owner 2026-10-09 chose to slow it down for the chase)
-  var CHASE_SPD = 0.5, SPD_LO = 0, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', matchMedia('(hover: none)').matches ? 0.2 : 0), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
+  // The throttle's curve is cubic (owner, 2026-10-09: "speed control sucks when I want to go slowly"): SPD_HI x t^3, so
+  // the bottom half of the travel is 0-5 km/s, finely (t 0.1: 40 m/s, 0.2: 320 m/s, 0.3: 1.1 km/s, 0.5: 5, 0.75: 17,
+  // 1: 40). W/S move it 0.5 a second. The boost scales with it: +1.5x the speed, at least +2 km/s and at most +BOOST.
+  var CHASE_SPD = 0.5, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', matchMedia('(hover: none)').matches ? 0.5 : 0), 0, 1);
+  var spd = function (t) { return SPD_HI * t * t * t; }, speed = spd(throttle);
   var mouse = null, DEAD = 0.08;   // the cursor (-1..1 from the centre, or null if not over the page)
   var yaw = { x: qs('hdg', 258), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
   var seat = [{ x: 0, v: 0 }, { x: 0, v: 0 }, { x: 0, v: 0 }];   // offset in the ball, in ball radii
@@ -88,6 +92,12 @@
   // HYBRID by default (owner: "mouse is not integrated" -- in FREE the mouse did nothing)
   var mode = ((/[?&]mode=(free|hybrid|input)\b/.exec(location.search) || [])[1] || 'hybrid').toUpperCase();
   var modeBtn = document.getElementById('mode');
+  // the teleport (search.js, Ctrl+K): the suit is put over (lat, lon) at altKm (5 km if not given), the floor worked out
+  // afresh there; heading, speed and mode carry on
+  S.teleport = function (la, lo, altKm) {
+    lat = clamp(la, -89.9, 89.9); lon = ((lo % 360) + 540) % 360 - 180;
+    pos[1] = clamp(altKm == null ? 5 : altKm, ALT_LO, ALT_HI); floor = ALT_LO; floorT = -1e9; ap.alt = null;
+  };
   S.setMode = function (name) {
     mode = MODES.indexOf(name) < 0 ? 'FREE' : name; lastKey = -1e9;   // a switch takes effect at once, nothing carried over
     showMode();
@@ -123,7 +133,7 @@
   }
   var FLY = { l: 1, r: 1, u: 1, d: 1, ql: 1, qr: 1 };   // the keys that steer (and so take over in HYBRID)
   addEventListener('keydown', function (e) {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || S.typing) return;   // (S.typing: the Ctrl+K search box has the keys)
     if (e.key === 'm' || e.key === 'M') { if (!e.repeat) nextMode(); e.preventDefault(); return; }
     var r = keyRole(e); if (!r) return;
     if (mode === 'FREE' && FLY[r] && modeBtn) {   // the steering keys don't fly in FREE: say how to take the controls
@@ -143,7 +153,7 @@
   function step(dt, now) {
     // the mouse as a stick: its offset from the centre, past the dead zone
     var dz = function (v) { return Math.sign(v) * Math.max(0, Math.abs(v) - DEAD) / (1 - DEAD); };
-    var ms = mouse && mode !== 'FREE' ? [dz(mouse[0]), -dz(mouse[1])] : [0, 0];
+    var ms = mouse && mode !== 'FREE' && !S.typing ? [dz(mouse[0]), -dz(mouse[1])] : [0, 0];
     if (ms[0] || ms[1]) lastKey = now;
     var held_ = keys.l || keys.r || keys.u || keys.d || keys.ql || keys.qr || ms[0] || ms[1];
     var manual = mode === 'INPUT' || (mode === 'HYBRID' && (now - lastKey < 4000 || held_));
@@ -151,8 +161,8 @@
     // the throttle: W/S move it (0.8 a second) and it stays, in every mode (from a standstill even the autopilot needs
     // it); Shift boosts
     var boosting = !!keys.b;
-    throttle = clamp(throttle + ((keys.tu ? 1 : 0) - (keys.td ? 1 : 0)) * 0.8 * dt, 0, 1);
-    var chasing = !manual && ap.id !== null, cruise = SPD_LO + throttle * (SPD_HI - SPD_LO) + (boosting ? BOOST : 0);   // (the autopilot has an aircraft: it slows for the chase, then runs back up)
+    throttle = clamp(throttle + ((keys.tu ? 1 : 0) - (keys.td ? 1 : 0)) * 0.5 * dt, 0, 1);
+    var chasing = !manual && ap.id !== null, cruise = spd(throttle) + (boosting ? Math.min(BOOST, Math.max(2, spd(throttle) * 1.5)) : 0);   // (the autopilot has an aircraft: it slows for the chase, then runs back up)
     if (!reduce) speed += ((chasing ? Math.min(cruise, Math.max(CHASE_SPD, (ap.range - 8) * 0.4)) : cruise) - speed) * Math.min(1, dt * 1.2);
     if (!reduce) T += dt;
     // the traffic round the suit, as seen from it (still under reduced motion)

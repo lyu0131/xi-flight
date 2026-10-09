@@ -14,7 +14,11 @@ import { Geodetic } from '@takram/three-geospatial'
 const ASSET = 2275207   // Google Photorealistic 3D Tiles
 // px of screen-space error a tile may show before it splits: the detail. It starts at 8 (twice the first build's 16)
 // and sky.js tunes it to the machine between DETAIL_MIN (finest) and DETAIL_MAX by the frame time (setDetail)
-const ERROR_TARGET = 8, DETAIL_MIN = 5, DETAIL_MAX = 24
+// (DETAIL_MIN 2 since 2026-10-09: the detail had sat at its old floor of 5 with frames to spare)
+const ERROR_TARGET = 8, DETAIL_MIN = 2, DETAIL_MAX = 24
+// the tile cache's memory: 1.2 GB, 0.9 GB kept when it trims (3d-tiles-renderer's 0.4 / 0.3 GB filled at ~1300 tiles,
+// and from then on no finer tile could load whatever the detail asked: owner 2026-10-09, "make rendering a lot better")
+const GB = 2 ** 30, CACHE_MAX = 1.2 * GB, CACHE_MIN = 0.9 * GB
 const DRACO = 'https://cdn.jsdelivr.net/npm/three@0.181.0/examples/jsm/libs/draco/gltf/'
 const D = Math.PI / 180, TOP = 30000   // heightAt casts down from 30 km (over the tallest peak at EXAG 3)
 // the relief, exaggerated (owner, 2026-10-09: "scale the mountains up", 3x): every tile vertex's height over the
@@ -34,6 +38,25 @@ function exaggerate(o) {
     out[i * 3] = I[0] * px + I[4] * py + I[8] * pz + I[12]; out[i * 3 + 1] = I[1] * px + I[5] * py + I[9] * pz + I[13]; out[i * 3 + 2] = I[2] * px + I[6] * py + I[10] * pz + I[14]
   }
   g.setAttribute('position', new THREE.BufferAttribute(out, 3)); g.computeBoundingSphere(); g.computeBoundingBox()
+}
+// ...and each tile's culling volume lifted the same way, as the tileset is read: without it the volumes stayed at the
+// real heights, so low over hills the lifted tiles near the suit lay outside their own volumes, were culled as out of
+// view, and the flat Earth showed through the holes (owner 2026-10-09: "weird glitchings"). A box grows to hold its
+// eight corners lifted too (heights clamped to the Earth's -0.5..9 km, so a continent-sized box's corners, far out in
+// space, aren't flung away); a sphere grows by the most its contents can move.
+const lift = h => (Math.min(9000, Math.max(-500, h))) * (EXAG - 1)
+function heightOf(v) { const r = v.length(), nx = v.x / r, ny = v.y / r, nz = v.z / r; return r - 1 / Math.sqrt((nx * nx + ny * ny) / (WA * WA) + nz * nz / (WB * WB)) }
+const _p = new THREE.Vector3()
+function liftVolume(bv) {
+  const o = bv.obb || bv.regionObb
+  if (o) {
+    for (const c of o.points) {
+      _p.copy(c).multiplyScalar(1 + lift(heightOf(c)) / c.length()).applyMatrix4(o.inverseTransform)
+      o.box.expandByPoint(_p)
+    }
+    o.update()
+  }
+  if (bv.sphere) { const s = bv.sphere; _p.copy(s.center); s.radius += Math.abs(lift(heightOf(_p) + s.radius)) }
 }
 
 // a tile's material: its photo, lit by the scene's lights (Takram's sun light and sky light probe) like the flat
@@ -119,8 +142,14 @@ export function setNight(map, k, sunDir, lightDir, glow, nl) {
   night.uGlowGlobal.value = glow.global; night.uGlowNear.value = nl ? glow.near : 0
   if (nl) { night.uNL.value = nl.texture; night.uNLMask.value = nl.loadedMask; night.uNLBox.value.set(nl.bounds.x0, nl.bounds.y0) }
 }
+// the photo is filtered properly (owner 2026-10-09: "make rendering a lot better"): mipmapped, and anisotropic up to 8x,
+// so the ground far off and seen at a slant is sharp instead of sparkling (TileCompressionPlugin turns mipmaps off by
+// default, to save memory: a third more texture memory buys it back)
+let ANISO = 8
 function tileMaterial(m) {
-  const mat = new THREE.MeshStandardMaterial({ map: m.map || null, roughness: 1, metalness: 0 })
+  const t = m.map
+  if (t) { t.anisotropy = ANISO; t.needsUpdate = true }
+  const mat = new THREE.MeshStandardMaterial({ map: t || null, roughness: 1, metalness: 0 })
   mat.onBeforeCompile = nightPatch
   return mat
 }
@@ -128,10 +157,13 @@ function tileMaterial(m) {
 export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
   const state = { on: true, loaded: 0, failed: false, errorTarget: ERROR_TARGET }
   const tiles = new TilesRenderer()
+  tiles.lruCache.maxBytesSize = CACHE_MAX; tiles.lruCache.minBytesSize = CACHE_MIN
   tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId: ASSET, autoRefreshToken: true }))
   tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: new DRACOLoader().setDecoderPath(DRACO) }))
   tiles.registerPlugin(new TileCompressionPlugin())
+  ANISO = Math.min(8, renderer.capabilities.getMaxAnisotropy())
   tiles.errorTarget = ERROR_TARGET
+  if (EXAG !== 1) { const pre = tiles.preprocessNode.bind(tiles); tiles.preprocessNode = (tile, dir, parent) => { pre(tile, dir, parent); liftVolume(tile.engineData.boundingVolume) } }
   // (the Google auth plugin, registered once ion answers, sets its own errorTarget of 20: put ours back)
   tiles.addEventListener('load-root-tileset', () => { tiles.errorTarget = state.errorTarget })
   tiles.addEventListener('load-model', e => {

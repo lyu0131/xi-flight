@@ -30,16 +30,26 @@
   <canvas id="world" aria-hidden="true"></canvas>
   <canvas id="hud" aria-hidden="true"></canvas>
   <canvas id="seat" aria-hidden="true"></canvas>
-  <p id="hint" aria-hidden="true"><span class="fine">W TO GO · MOUSE STEERS · W/S THROTTLE · SHIFT BOOST · M MODE · [ ] TIME</span><span class="touch">THE AUTOPILOT FLIES</span></p>
+  <p id="hint" aria-hidden="true"><span class="fine">W TO GO · MOUSE STEERS · W/S THROTTLE · SHIFT BOOST · M MODE · [ ] TIME · CTRL+K GO TO</span><span class="touch">THE AUTOPILOT FLIES</span></p>
   <p id="loading" aria-live="polite">LOADING THE EARTH · 0%</p>
   <p id="attrib"></p>
   <!-- bottom left: the world clock's readout (sky.js) stacked on the mode switch (ball.js) -->
   <div id="dock"><button id="time" type="button">TIME · ×1</button><button id="mode" type="button">MODE: FREE</button></div>
   <p class="nogl-note">This browser can't draw the panoramic monitor (no WebGL2).</p>
 </main>
+<!-- Ctrl+K: go to a place (search.js) -->
+<dialog id="find" aria-label="Go to a place">
+  <form id="find-form">
+    <input id="find-q" type="search" autocomplete="off" spellcheck="false" placeholder="GO TO · A PLACE, OR LAT, LON" aria-label="A place, or latitude and longitude">
+    <ul id="find-list"></ul>
+    <p id="find-say" aria-live="polite"></p>
+    <p class="find-credit">ENTER TO SEARCH · ESC TO CLOSE · PLACES © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OPENSTREETMAP</a></p>
+  </form>
+</dialog>
 <!-- the Cesium ion key for the 3D Earth (git-ignored; without it the flat Earth shows) -->
 <script src="js/keys.js"></script>
 <script src="js/ball.js" defer></script>
+<script src="js/search.js" defer></script>
 <script src="js/traffic.js" defer></script>
 <script src="js/traffic-data.js" defer></script>
 <script src="js/ring-data.js" defer></script>

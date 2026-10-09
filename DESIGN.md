@@ -22,9 +22,10 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   curvature; nothing is pre-curved.
 - **Flight, in km** (spec `docs/2026-10-07-flight-earth-design.md`): world frame x east, y up, z north; the suit
   flies along its nose, `pose.pos` = [x, alt, z], `pose.geo` = [lat, lon]. **Speed** (5x the real-scale range, owner
-  2026-10-08): the throttle sets it between `SPD_LO` 0 and `SPD_HI` 40 km/s; the flight **starts standing still**, W to go
-  and S back down to a stop (owner, 2026-10-09; on a touch screen, with no W, it starts at 0.2, 8 km/s). W/S work in
-  every mode. Shift adds `BOOST` 20. **Height**: starts at `ALT0` **400 km**, ceiling `ALT_HI` **1000 km**, floor `ALT_LO` 1 km or
+  2026-10-08): the throttle t sets it on a **cubic curve**, `SPD_HI` 40 km/s x t^3 (owner, 2026-10-09: going slowly was
+  impossible): 0.1 is 40 m/s, 0.3 about 1 km/s, 0.5 is 5 km/s, 1 is 40. W/S move t 0.5 a second, in every mode. The flight
+  **starts standing still** (on a touch screen, with no W, at 0.5, 5 km/s). Shift adds 1.5x the speed (at least 2 km/s,
+  at most `BOOST` 20). **Height**: starts at `ALT0` **400 km**, ceiling `ALT_HI` **1000 km**, floor `ALT_LO` 1 km or
   0.3 km over loaded terrain (the highest of here, 0.5 s and 1 s ahead, every 0.2 s, below 30 km; at a limit the climb
   is taken out). **Relief 3x** (owner, 2026-10-09): every 3D tile vertex's height over the ellipsoid is tripled as the
   tile loads (`EXAG` in earth3d.js, `?exag=1` for the real Earth); buildings stretch with it, the floor follows it. `?alt=` sets the start, `?seed=` the sky,
@@ -55,6 +56,10 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   sight), is held 0.5s to lock; the target is kept until it passes 7 deg or another sits 2.5 deg nearer, so the
   lock doesn't flicker. `pose.lockId` names it.
 - **No pause**: added 2026-10-08 (`P`, `#pause`), taken out again by the owner 2026-10-09.
+- **Go to (Ctrl+K / Cmd+K)** (`js/search.js`, owner 2026-10-09): a `<dialog>` in the HUD's voice. A place name is looked up
+  with OpenStreetMap's Nominatim on Enter only (its usage policy: no search-as-you-type; credited in the box), up to 5
+  results, the first focused; or `lat, lon` (and `, km`). `SITE5.teleport(lat, lon, km = 5)` puts the suit there, the
+  floor worked out afresh. While it's open `SITE5.typing` keeps the keys and the mouse from flying the suit.
 - `SITE5.pose` is the one per-frame snapshot both renderers read; `SITE5.renderers` are called in order.
 
 ## The picture (`js/sky.js`)
@@ -65,7 +70,14 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
   `assets/earth/`; if they can't load the readout says THE EARTH'S MAPS COULDN'T LOAD), lit through the air by the sun or the moon
   (Takram's sun light and sky light probe). Stars from the Yale bright-star catalogue, turned with the Earth: points on a sphere 5000 km round the camera
   (Takram's 'background' stars sit exactly on the far plane, where all of them were clipped), over a `SkyMaterial`
-  backdrop (the air's effect no longer paints the sky, which covered them too).
+  backdrop (the air's effect no longer paints the sky, which covered them too). At their apparent brightness from a
+  night exposure (60) up; in daylight (exposure 6) at a tenth, as a day exposure would barely show them.
+- **The 3D Earth's quality** (owner 2026-10-09, "make rendering a lot better"): the tile cache holds 1.2 GB (0.9 kept on
+  a trim; the library's 0.4 GB filled at ~1300 tiles and stopped any finer one loading), the detail tunes between 2 and
+  24 px (finer under 7.5 ms a frame, coarser over 12), tile photos get 8x anisotropic filtering. Mipmaps stay off (the
+  plugin's default): with them on, a third fewer tiles fit and the atlases bled into seams. With the 3x relief each tile's
+  culling volume is lifted too (its box grown to hold its corners lifted, heights clamped -0.5..9 km): without it the
+  tiles near the suit fell outside their own volumes and were culled, and the flat Earth showed through low over hills.
 - **The 3D Earth** (`js/earth3d.js`, spec `docs/2026-10-08-photoreal-earth-design.md`): Google's Photorealistic 3D Tiles,
   streamed through Cesium ion (asset 2275207) by `3d-tiles-renderer`, in ECEF metres (the scene's own frame, so the tile group
   needs no transform). Only the main camera drives the level of detail (`errorTarget` 16). Each tile's material is a lit

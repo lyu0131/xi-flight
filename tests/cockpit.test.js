@@ -7,7 +7,7 @@ const serve = require('./serve');
 // opened from a local server rooted at the repo
 let srv = null;
 // ONLY=main,3d,... runs just those blocks (main, altitude, modes, traffic, controls, horizon, world, light, 3d,
-// capture, seatlight, reduce, phone, hud, time, pause); unset, everything runs
+// capture, seatlight, reduce, phone, hud, time, pause, search); unset, everything runs
 const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null, want = n => !ONLY || ONLY.includes(n);
 async function launch(o) {
   const p = await launchFile(o);
@@ -23,7 +23,7 @@ async function launch(o) {
 }
 // the airways' height, at the lowest throttle, for the targeting checks -- with the 3D tiles off: streaming them low
 // over the ground jitters the frame timing these lock-and-hold checks measure (the 3D Earth has its own block)
-const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0.0625&hdg=0&tiles=0';
+const PAGE = '../site5/index.html?seed=7&mode=hybrid&alt=11&throttle=0.397&hdg=0&tiles=0';
 // a read inside a frame that can't hang the run: if no frame comes within 3 s, or the read throws, it gives `none`
 const inFrame = (p, body, none) => Promise.race([p.eval(`new Promise(r => requestAnimationFrame(() => { ${body} }))`),
   new Promise(r => setTimeout(() => r(none), 3000))]).then(v => v == null ? none : v);
@@ -276,14 +276,14 @@ async function ready(p) {
     const lo = await pose(a, 's.alt');
     check('the floor and ceiling hold', Number.isFinite(hi) && hi <= 1000 && Number.isFinite(lo) && lo >= 1, JSON.stringify([hi, lo]));
     // on the real globe: at throttle 0.25 it flies 10 km/s; north raises the latitude by the distance over 111.2 km a degree; the date line wraps
-    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&hdg=0&alt=18&throttle=0.25', 300); await ready(a);
+    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&hdg=0&alt=18&throttle=0.63', 300); await ready(a);
     const q0 = JSON.parse(await pose(a, 'JSON.stringify(s.pos)')), g0 = JSON.parse(await pose(a, 'JSON.stringify(s.geo)')); await a.sleep(2000);
     const q1 = JSON.parse(await pose(a, 'JSON.stringify(s.pos)')); const mv = Math.hypot(q1[0] - q0[0], q1[2] - q0[2]);
     check('throttle 0.25 flies 10 km/s', mv > 17 && mv < 23, mv.toFixed(2) + ' km in 2s');
     await a.sleep(8000); const g1 = JSON.parse(await pose(a, 'JSON.stringify(s.geo)')), north = (g1[0] - g0[0]) * 111.2;
     const flown = Math.hypot(...[0, 2].map(i => JSON.parse(JSON.stringify(q1))[i]));
     check('north raises the latitude', north > 85 && north < 115 && Math.abs(g1[1] - g0[1]) < 0.01, JSON.stringify({ g0, g1, north }));
-    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&lon=179.99&hdg=90&alt=18&throttle=0.25', 300); await ready(a); await a.sleep(3000);
+    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&lon=179.99&hdg=90&alt=18&throttle=0.63', 300); await ready(a); await a.sleep(3000);
     const gd = JSON.parse(await pose(a, 'JSON.stringify(s.geo)'));
     check('the date line wraps', Number.isFinite(gd[1]) && gd[1] > -180 && gd[1] < -170, JSON.stringify(gd));   // (crossed east into the -180.. side; how far depends on how long the page took to load)
     await a.goto(PAGE + '&traffic=0', 300); await ready(a); await a.sleep(2000);
@@ -298,7 +298,7 @@ async function ready(p) {
     const key = (type, k, code, vk) => q.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk });
     // chasing an aircraft the autopilot slows to 0.5 km/s (5x speed raced past them, so it could never hold a lock),
     // and runs back up to the throttle's speed when it has none
-    await q.goto('../site5/index.html?seed=7&mode=free&alt=11&hdg=0&throttle=0.5&tiles=0&nightlights=0', 300); await ready(q);
+    await q.goto('../site5/index.html?seed=7&mode=free&alt=11&hdg=0&throttle=0.794&tiles=0&nightlights=0', 300); await ready(q);
     for (let i = 0; i < 100 && !(await q.eval('SITE5.pose.chasing')); i++) await q.sleep(100);
     await q.sleep(2500);
     const chase = JSON.parse(await q.eval('JSON.stringify({ chasing: SITE5.pose.chasing, speed: SITE5.pose.speed })'));
@@ -363,7 +363,7 @@ async function ready(p) {
     await hold('w', 'KeyW', 87, 1200);
     const spUp = await pose(k, 's.speed'); await k.sleep(1000); const spKept = await pose(k, 's.speed');
     check('W raises the throttle and it stays', spUp > sp0 + 0.4 && spKept > sp0 + 0.4, JSON.stringify([sp0, spUp, spKept]));
-    await hold('s', 'KeyS', 83, 2500); await k.sleep(800);
+    await hold('s', 'KeyS', 83, 2500); await k.sleep(3000);   // (the speed eases down from ~20 km/s)
     const spDown = await pose(k, 's.speed');
     check('S lowers it', spDown < sp0 - 0.25, JSON.stringify([sp0, spDown]));
     const spPre = await pose(k, 's.speed'); await key('keyDown', 'Shift', 'ShiftLeft', 16, 8); await k.sleep(1500); const spB = await pose(k, 's.speed'); const boosting = await pose(k, 's.boost'); const lever = await k.eval('SITE5.parts.controlsL.boost');
@@ -392,9 +392,12 @@ async function ready(p) {
     await k.goto('../site5/index.html?seed=7&mode=input&alt=18&tiles=0', 300); await ready(k); await k.sleep(800);
     const sp00 = await pose(k, 's.speed'), g00 = await pose(k, 'JSON.stringify(s.geo)'); await k.sleep(1000);
     const still0 = (await pose(k, 'JSON.stringify(s.geo)')) === g00;
-    await hold('w', 'KeyW', 87, 500); await k.sleep(1500); const spGo = await pose(k, 's.speed');
+    await hold('w', 'KeyW', 87, 1500); await k.sleep(1500); const spGo = await pose(k, 's.speed');
     await hold('s', 'KeyS', 83, 1500); await k.sleep(4000); const spStop = await pose(k, 's.speed');
     check('it starts stopped, W goes, S stops it', sp00 === 0 && still0 && spGo > 5 && spStop < 0.05, JSON.stringify({ sp00, still0, spGo, spStop }));
+    // going slowly (owner, 2026-10-09: the throttle is cubic): a short tap from a stop is a crawl, tens of m/s
+    await hold('w', 'KeyW', 87, 200); await k.sleep(3000); const crawl = await pose(k, 's.speed');
+    check('a tap of W from a stop is a crawl (10-200 m/s)', crawl > 0.01 && crawl < 0.2, (crawl * 1000).toFixed(0) + ' m/s');
     {   // 5x faster (owner, 2026-10-08): full throttle is 40 km/s
       const p = k;
       await p.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(p); await p.sleep(5000);
@@ -529,9 +532,9 @@ async function ready(p) {
       // the detail follows the frame time: headless frames run fast, so it should have gone finer than the start (8)
       await t.sleep(7000);
       const et = await t.eval('SITE5.world.tiles.errorTarget');
-      check('the 3D detail tunes itself to the machine (finer on fast frames, never past 5)', et < 8 && et >= 5, String(et));
+      check('the 3D detail tunes itself to the machine (finer on fast frames, never past 2)', et < 8 && et >= 2, String(et));
       // low down over the Alps (where the terrain floor asks for the ground's height) the flight and the tiles run on
-      await t.goto('../site5/index.html?seed=7&throttle=0.0625&mode=input&lat=45.9&lon=7.0&hdg=60&alt=12&time=2026-10-08T11:00:00Z', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&throttle=0.397&mode=input&lat=45.9&lon=7.0&hdg=60&alt=12&time=2026-10-08T11:00:00Z', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
       const low = JSON.parse(await t.eval('JSON.stringify({ alt: SITE5.pose.alt, f: SITE5.frames, tiles: SITE5.world.tiles.loaded })')); await t.sleep(2000);
       const low2 = await t.eval('SITE5.frames');
@@ -540,7 +543,7 @@ async function ready(p) {
       // tiles' steep faces mustn't catch it (they showed as pink-white streaks, 151 of these slivers before the fix).
       // Counted on the world's canvas alone (no HUD, no seat): a bright pixel standing well above both its neighbours.
       // (?nightlights=0: the 500 m city lights are sharp bright points by design, and this counter takes them for slivers)
-      await t.goto('../site5/index.html?seed=7&alt=80&throttle=0.0625&mode=input&nightlights=0', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&alt=80&throttle=0.397&mode=input&nightlights=0', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
       await t.sleep(6000);
       const slivers = await inFrame(t, `const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
@@ -555,24 +558,48 @@ async function ready(p) {
       for (let i = 0; i < 120 && !((await t.eval('SITE5.world.heightAt(45.8326, 6.8652)')) > 3500); i++) await t.sleep(250);
       const mb = await t.eval('SITE5.world.heightAt(45.8326, 6.8652)');
       check('it\'s 3D: Mont Blanc stands over 3500 m', mb > 3500, String(mb));
-      await t.goto('../site5/index.html?seed=7&lat=45.8326&lon=6.8652&alt=1&hdg=0&throttle=0.0625&time=2026-10-08T11:00:00Z', 300); await ready(t); await t.sleep(6000);
+      // the 3x relief (owner 2026-10-09) lifts each tile's ground: its culling volume must hold the lifted ground too,
+      // or low over hills the tiles near the suit were culled as out of view and the flat Earth showed through (with
+      // streaks at the holes' edges). Every 37th vertex of every loaded fine tile (geometric error up to 2 km: Google's
+      // coarse tiles overhang their own volumes by kilometres even at 1x), inside its tile's volume (50 m slack)? At 1x
+      // about 2.7% aren't (by up to ~230 m: Google's data); without the lifted volumes 84% weren't.
+      await t.goto('../site5/index.html?seed=7&mode=input&traffic=0&lat=37.13&lon=-3.65&alt=1&hdg=0&time=2026-10-08T15:00:00Z', 300); await ready(t);
+      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 400')); i++) await t.sleep(250);
+      const vol = JSON.parse(await t.eval(`(() => { let n = 0, out = 0;
+        SITE5.world.tileset.forEachLoadedModel((scene, tile) => {
+          if (tile.geometricError > 2000) return;
+          const bv = tile.engineData.boundingVolume, o = bv.obb || bv.regionObb, s = bv.sphere;
+          scene.updateMatrixWorld(true);
+          scene.traverse(mh => { if (!mh.isMesh) return; const e = mh.matrixWorld.elements, a = mh.geometry.attributes.position;
+            for (let i = 0; i < a.count; i += 37) {
+              const x = a.getX(i), y = a.getY(i), z = a.getZ(i), w = [0, 1, 2].map(k => e[k] * x + e[4 + k] * y + e[8 + k] * z + e[12 + k]); n++;
+              let ok = true;
+              if (o) { const I = o.inverseTransform.elements, l = [0, 1, 2].map(k => I[k] * w[0] + I[4 + k] * w[1] + I[8 + k] * w[2] + I[12 + k]);
+                ok = ['x', 'y', 'z'].every((c, k) => l[k] >= o.box.min[c] - 50 && l[k] <= o.box.max[c] + 50) }
+              if (s && Math.hypot(w[0] - s.center.x, w[1] - s.center.y, w[2] - s.center.z) > s.radius + 50) ok = false;
+              if (!ok) out++;
+            } });
+        });
+        return JSON.stringify({ n, out }); })()`));
+      check('at 3x relief every tile\'s ground lies inside its culling volume', vol.n > 1000 && vol.out / vol.n < 0.05, JSON.stringify(vol));
+      await t.goto('../site5/index.html?seed=7&lat=45.8326&lon=6.8652&alt=1&hdg=0&throttle=0.397&time=2026-10-08T11:00:00Z', 300); await ready(t); await t.sleep(6000);
       const alt = await t.eval('SITE5.pose.alt'), ground = await t.eval('SITE5.world.heightAt(SITE5.pose.geo[0], SITE5.pose.geo[1])');
       check('the suit stays above the mountains (floor = terrain + 0.3 km)', ground === null || alt >= ground / 1000 + 0.29, alt.toFixed(2) + ' km over ' + ground);
       // (idle throttle and a prompt look: at 5x speed a long wait carries the suit out over the dark sea)
       // (16 km, not 10: since the night lights fade by altitude (brief 2026-10-08) the 500 m mosaic is the only glow
       // there, at full strength, and it fades out below ~10 km: wait for it too)
-      await t.goto('../site5/index.html?seed=7&traffic=0&mode=input&throttle=0.0625&lat=40.85&lon=14.27&alt=16&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&traffic=0&mode=input&throttle=0.397&lat=40.85&lon=14.27&alt=16&time=2026-10-08T22:00:00Z', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20 && SITE5.world.nightTiles.loaded > 100')); i++) await t.sleep(250);
       await t.sleep(2500);
       const warm = await inFrame(t, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
         g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
       check('the cities glow on the 3D Earth at night', warm > 0.02, (warm * 100).toFixed(2) + '% warm ' + await t.eval('JSON.stringify({ glow: SITE5.world.nightGlow, nt: SITE5.world.nightTiles, alt: SITE5.pose.alt, expo: SITE5.world.exposure })'));
       // the night lights by altitude (brief 2026-10-08): the coarse 3 km glow fades out low down; a 500 m mosaic streams in
-      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.0625&alt=5&lat=42.6&lon=11.2&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.397&alt=5&lat=42.6&lon=11.2&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
       check('low down the coarse 3 km city glow is gone', (await t.eval('SITE5.world.nightGlow.global')) === 0, JSON.stringify(await t.eval('SITE5.world.nightGlow')));
-      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.0625&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.397&time=2026-10-08T22:00:00Z', 300); await ready(t); await t.sleep(1500);
       check('from 400 km the global city glow is full', (await t.eval('SITE5.world.nightGlow.global')) === 1);
-      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.0625&alt=60&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=0.397&alt=60&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.nightTiles.loaded > 100')); i++) await t.sleep(250);
       check('the 500 m night-light mosaic streams in round the suit', (await t.eval('SITE5.world.nightTiles.loaded')) > 100, JSON.stringify(await t.eval('SITE5.world.nightTiles')));
       check('at 60 km the near night lights are on', (await t.eval('SITE5.world.nightGlow.near')) === 1);
@@ -588,9 +615,11 @@ async function ready(p) {
       await t.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 }); await t.sleep(30000);
       await t.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
       check('a long fast flight: frames hold, no errors', (await t.eval('SITE5.frameMs')) < 12 && t.errors.length === 0, (await t.eval('SITE5.frameMs')).toFixed(1) + 'ms ' + t.errors.join(' | '));
-      // (the tiles' GPU memory is freed as they leave: the texture count at the end of the flight stays under 3x the start's, or an absolute 1500)
+      // (the tiles' GPU memory is freed as they leave: the tile cache stays within its 1.2 GB budget, and the texture count
+      // stays under its 8000-tile item cap)
       const mem1 = await t.eval('SITE5.world.renderer.info.memory.textures');
-      check('a long fast flight: GPU textures stay bounded', mem1 < Math.max(3 * mem0, 1500), mem0 + ' -> ' + mem1);
+      const lru = JSON.parse(await t.eval('JSON.stringify([SITE5.world.tileset.lruCache.cachedBytes, SITE5.world.tileset.lruCache.maxBytesSize])'));
+      check('a long fast flight: GPU textures stay bounded', mem1 < 8000 && lru[0] <= lru[1] * 1.1, mem0 + ' -> ' + mem1 + ' textures, cache ' + (lru[0] / 2 ** 20).toFixed(0) + ' of ' + (lru[1] / 2 ** 20).toFixed(0) + ' MB');
       await t.goto('../site5/index.html?seed=7&tilestoken=bad', 300); await ready(t); await t.sleep(4000);
       check('a bad key says so and the flat Earth flies on', (await t.eval('document.getElementById("loading").textContent')).includes("THE 3D EARTH COULDN'T LOAD") && await t.eval('SITE5.world.tiles.failed && SITE5.frames > 30'));
     } else ['the 3D Earth streams in', 'after a resize the tiles keep loading, no errors', 'it\'s 3D: Mont Blanc stands over 3500 m',
@@ -741,6 +770,37 @@ async function ready(p) {
     const g0 = await pose(p, 'JSON.stringify(s.geo)'); await p.sleep(1000);
     check('P no longer pauses, and there is no pause button', (await pose(p, 'JSON.stringify(s.geo)')) !== g0 && !(await p.eval('document.getElementById("pause")')));
     check('pause: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    p.close();
+  }
+
+  // Ctrl+K, go to a place (owner, 2026-10-09): coordinates or a place name; typing in the box doesn't fly the suit
+  if (want('search')) {
+    const p = await launch({ width: 1440, height: 900 });
+    await p.goto('../site5/index.html?seed=7&mode=input&alt=20&tiles=0', 300); await ready(p);
+    const kd = (key, code, vk, mods = 0) => p.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, modifiers: mods });
+    const ku = (key, code, vk, mods = 0) => p.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers: mods });
+    const ctrlK = async () => { await kd('k', 'KeyK', 75, 2); await ku('k', 'KeyK', 75, 2); await p.sleep(200); };
+    const typeIn = async t => { await p.send('Input.insertText', { text: t }); };
+    const enter = async () => { await kd('Enter', 'Enter', 13); await p.send('Input.dispatchKeyEvent', { type: 'char', text: String.fromCharCode(13), key: 'Enter' }); await ku('Enter', 'Enter', 13); };
+    await ctrlK();
+    check('Ctrl+K opens the go-to box, focused', await p.eval('document.getElementById("find").open && document.activeElement.id === "find-q"'));
+    const thr0 = await pose(p, 's.throttle');
+    await kd('w', 'KeyW', 87); await p.send('Input.dispatchKeyEvent', { type: 'char', text: 'w' }); await p.sleep(600); await ku('w', 'KeyW', 87);
+    check('typing in it does not fly the suit', (await pose(p, 's.throttle')) === thr0 && (await p.eval('document.getElementById("find-q").value')) === 'w');
+    await p.eval('document.getElementById("find-q").value = ""'); await typeIn('41.89, 12.49'); await enter(); await p.sleep(400);
+    const g = JSON.parse(await pose(p, 'JSON.stringify([s.geo, s.alt])'));
+    check('"lat, lon" teleports there, 5 km up, and closes the box', Math.abs(g[0][0] - 41.89) < 0.05 && Math.abs(g[0][1] - 12.49) < 0.05 && Math.abs(g[1] - 5) < 0.5 && !(await p.eval('document.getElementById("find").open')), JSON.stringify(g));
+    await ctrlK(); await typeIn('Mount Fuji'); await enter();
+    for (let i = 0; i < 40 && !(await p.eval('!!document.querySelector("#find-list button")')); i++) await p.sleep(250);
+    check('a place name lists results, the first focused', await p.eval('document.activeElement === document.querySelector("#find-list button")'), await p.eval('document.getElementById("find-say").textContent'));
+    await enter(); await p.sleep(400);
+    const f = JSON.parse(await pose(p, 'JSON.stringify(s.geo)'));
+    check('Enter on it goes there (Mount Fuji)', Math.abs(f[0] - 35.36) < 0.2 && Math.abs(f[1] - 138.73) < 0.2, JSON.stringify(f));
+    await ctrlK(); await kd('Escape', 'Escape', 27); await ku('Escape', 'Escape', 27); await p.sleep(200);
+    check('Esc closes it and the keys fly again', !(await p.eval('document.getElementById("find").open')) && (await p.eval('SITE5.typing')) === false);
+    await p.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await ctrlK();
+    check('the box fits a phone', await p.eval('(() => { const r = document.getElementById("find").getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; })()'));
+    check('search: no JS errors', p.errors.length === 0, p.errors.join(' | '));
     p.close();
   }
 

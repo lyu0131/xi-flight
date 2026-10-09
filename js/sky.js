@@ -107,6 +107,7 @@ const earth3d = TOKEN && qp.get('tiles') !== '0'
 if (earth3d && DETAIL) earth3d.setDetail(DETAIL)
 world.tiles = earth3d ? earth3d.state : { on: false, loaded: 0, failed: false }
 world.heightAt = earth3d ? earth3d.heightAt : () => null
+world.tileset = earth3d ? earth3d.tiles : null   // (the TilesRenderer itself, for the tests)
 // the sky, drawn as the scene's backdrop (a full-screen quad at infinity), and the stars over it: points at infinity,
 // turned with the Earth. (The air's effect used to paint the sky itself, over every background pixel. And the stars'
 // own 'background' mode puts each one exactly on the camera's far plane, where all of them were clipped: none ever
@@ -262,11 +263,11 @@ let expo = null, lastT = 0, meterGoal = 0, tilesAt = 0, capAt = 0
 // exposure from the day's DAY_EXPO up to EXPO_MAX; brighter than that (day, sunset) it stays at DAY_EXPO
 const METER = 0.1, EXPO_MAX = 300
 S.renderers.push(function (pose, Wd, Hd) {
-  // every 2 s: the 3D Earth's detail follows the frame time (finer while frames run under 10 ms, coarser over 17 ms),
+  // every 2 s: the 3D Earth's detail follows the frame time (finer while frames run under 7.5 ms, coarser over 12 ms: with a 1.2 GB tile cache it would otherwise climb to 17),
   // and only past that, at 21 ms, does the picture's resolution step down
   if (pose.t > checkAt) {
     checkAt = pose.t + 2
-    if (earth3d && !earth3d.state.failed && !DETAIL) earth3d.setDetail(earth3d.state.errorTarget * (S.frameMs < 7.5 ? 1 / 1.25 : S.frameMs > 17 ? 1.25 : 1))
+    if (earth3d && !earth3d.state.failed && !DETAIL) earth3d.setDetail(earth3d.state.errorTarget * (S.frameMs < 7.5 ? 1 / 1.25 : S.frameMs > 12 ? 1.25 : 1))
     if (S.frameMs > 21 && scale > 0.6) scale = Math.max(0.6, scale - 0.15)
   }
   const w = Math.max(1, Math.round(Wd * scale)), h = Math.max(1, Math.round(Hd * scale))
@@ -301,7 +302,7 @@ S.renderers.push(function (pose, Wd, Hd) {
   for (const o of [ap, clouds, sunLight, skyLight, starsMat, skyMat]) o.sunDirection.copy(light)
   ap.moonDirection && ap.moonDirection.copy(moon); skyMat.moonDirection.copy(moon)
   sunLight.target.position.copy(P); sunLight.update(); skyLight.position.copy(P); skyLight.update()
-  earthMat.emissiveIntensity = CITY / exposure; starsMat.intensity = STAR / exposure
+  earthMat.emissiveIntensity = CITY / exposure; starsMat.intensity = STAR * Math.min(1, exposure / 60) / exposure   // (at their apparent brightness from a night exposure of 60 up; in daylight, exposure 6, a tenth: a day exposure barely shows them)
   const glow = world.nightGlow = { global: smoothstep(40, 60, pose.alt), near: nightLights ? smoothstep(8, 15, pose.alt) : 0 }
   if (nightLights) nightLights.update(pose.geo[0], pose.geo[1])
   // (the real sun gates the city lights, even while the moon lights the scene; the same lights on the tiles)
