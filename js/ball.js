@@ -68,11 +68,11 @@
   // frame round the start, for the traffic.
   var RE = S.RE = 6371, KM_DEG = RE * D;   // km of ground per degree of latitude
   var lat = LAT0, lon = LON0;
-  var SEED = qs('seed', 1), TRAFFIC = qs('traffic', 1), ALT_LO = 1, ALT_HI = 100, ALT0 = 18, tr = null, floor = ALT_LO, floorT = -1e9;   // near space by default (owner: 'almost in space but not really'); the edge of space is the ceiling
+  var SEED = qs('seed', 1), TRAFFIC = qs('traffic', 1), ALT_LO = 1, ALT_HI = 1000, ALT0 = 400, tr = null, floor = ALT_LO, floorT = -1e9;   // low orbit's height by default, 1000 km the ceiling (owner, 2026-10-08)
   // speed: the throttle (0..1) sets it between SPD_LO and SPD_HI km/s; a boost adds BOOST while held; the actual
-  // speed follows on a lag. At real scale the range runs from Mach 1.5 to near orbital: 0.5-8 km/s, cruise 2
-  // (throttle 0.2), boost +4. ?throttle= sets the start.
-  var SPD_LO = 0.5, SPD_HI = 8, BOOST = 4, throttle = clamp(qs('throttle', 0.2), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
+  // speed follows on a lag. 5x the real-scale range since the owner asked, 2026-10-08: 2.5-40 km/s, cruise 10
+  // (throttle 0.2), boost +20. ?throttle= sets the start.
+  var SPD_LO = 2.5, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', 0.2), 0, 1), speed = SPD_LO + throttle * (SPD_HI - SPD_LO);
   var mouse = null, looking = false, DEAD = 0.08;   // the cursor (-1..1 from the centre, or null if not over the page)
   var yaw = { x: qs('hdg', 258), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
   var seat = [{ x: 0, v: 0 }, { x: 0, v: 0 }, { x: 0, v: 0 }];   // offset in the ball, in ball radii

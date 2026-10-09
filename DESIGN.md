@@ -21,9 +21,11 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   never at the centre, everything on it bends, and the bend moves as the seat sways. That is the only source of
   curvature; nothing is pre-curved.
 - **Flight, in km** (spec `docs/2026-10-07-flight-earth-design.md`): world frame x east, y up, z north; the suit
-  flies along its nose at 0.25 km/s, `pose.pos` = [x, alt, z], altitude kept 2–30 km (at a limit the climb is taken
-  out). `?alt=` sets the start (default 11), `?seed=` the sky, `?traffic=0` empties it. The dogfight is gone (owner,
-  2026-10-07: "no shooting").
+  flies along its nose, `pose.pos` = [x, alt, z], `pose.geo` = [lat, lon]. **Speed** (5x the real-scale range, owner
+  2026-10-08): the throttle sets it between `SPD_LO` 2.5 and `SPD_HI` 40 km/s (cruise 10 at the default throttle 0.2),
+  Shift adds `BOOST` 20. **Height**: starts at `ALT0` **400 km**, ceiling `ALT_HI` **1000 km**, floor `ALT_LO` 1 km or
+  0.3 km over loaded terrain (at a limit the climb is taken out). `?alt=` sets the start, `?seed=` the sky,
+  `?traffic=0` empties it. The dogfight is gone (owner, 2026-10-07: "no shooting").
 - **Traffic** (`js/traffic.js`): seven aircraft round the suit (AIRLINER, FREIGHTER, BIZJET, BALLOON; generic, made-up
   callsigns), spawned 25–55 km out round the heading, dropped past 70 km, seeded. They're the contacts: `d` and
   `range` from the suit (the Earth's drop taken off), plus `az`, `el`, `off`. `node site5/tests/traffic.test.js`.
@@ -36,7 +38,7 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   it's let go. (Owner, 2026-10-05: no lock after WASD; then, slowing the keys near contacts made turning
   a crawl when they were bunched.)
 - **Three modes** (owner, 2026-10-07), `M` or the MODE button (bottom left, the hint's voice, no box; above the hint on
-  narrow screens), `?mode=free|hybrid|input`, `pose.mode`; the triangle's word is `pose.modeWord`:
+  narrow screens; `#time` stacked on it in a `#dock` that grows up as the button wraps), `?mode=free|hybrid|input`, `pose.mode`; the triangle's word is `pose.modeWord`:
   **FREE** (the default) watches -- AUTO only, the keys don't fly; **HYBRID** shares -- AUTO, a key takes over (MANUAL,
   the word reads MANUAL) and it hands back 4s after the last key, with the aim assist; **INPUT** is yours -- the keys
   only, no assist, and let go it holds heading and altitude (the pitch eases level). A switch takes effect at once.
@@ -80,8 +82,20 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
 - **The light**: the real sun (twilight glow included) until twilight has ended (-10 deg); after that, with the moon
   up, the moon stands in for it at night exposure (0.45 against 10), easing over 3 s. Under the sun the monitor meters
   its own picture like a camera: never below the day's 10, opening up to 300 as the twilight dims (wall-clock, 3 s).
-  City lights and stars keep their apparent brightness whatever the exposure. The volumetric clouds are off for now
-  (owner, 2026-10-08); `?clouds=1` brings them back. The start: 40.92 N 14.95 E (east of Naples), 18 km, heading 258
+  **The meter reads the Earth only** (owner, 2026-10-08: from 400 km black space dragged the mean down until the ground
+  blew out): of the capture's samples (every 4th pixel; each face's directions in seat axes worked out once) it keeps
+  those below the geometric horizon, `dot(dir, upSeat) < -sin(horizonDip(alt))`; under 2% Earth the goal stays.
+  City lights and stars keep their apparent brightness whatever the exposure. **City lights only where it's dark on the
+  ground**: on the flat Earth (`earthMat`, `onBeforeCompile`) and the tiles (`setNight(map, k, sunDir)`) they're scaled by
+  `1 - smoothstep(-6, +2 deg)` of the real sun's elevation over that point (never the moon's, even when it lights the
+  scene); `SITE5.world.cityGlowAt(lat, lon)` is the same factor in JS.
+- **The world clock** (owner, 2026-10-08): the world's date is `START + pose.t + offset`, and each frame the offset
+  runs at (rate - 1) x the wall-clock frame time (capped 0.25 s), so it works under reduced motion too (where pose.t
+  stands still, and x0 and x1 both hold the clock). Rates x0 (paused), x1, x60, x600, x3600: `]` faster, `[` slower
+  (each stops at the end), `\` back to x1 and now (keys ignored while typing in a field). `#time` (bottom left,
+  stacked on MODE, its voice) reads `HH:MM LOCAL · ×RATE` (`⏸` paused), local being mean solar time (UTC + lon/15 h);
+  a tap steps the rate on, x3600 wrapping to x0. `SITE5.world.time` = { rate, date }. The hint says `[ ] TIME`. The volumetric clouds are off for now
+  (owner, 2026-10-08); `?clouds=1` brings them back. The start: 40.92 N 14.95 E (east of Naples), 400 km, heading 258
   (west, the city and the afterglow ahead), `2026-10-08T17:10:00Z` (dusk); `?lat ?lon ?alt ?hdg ?time ?throttle ?clouds`.
 - **The ball**: the camera sits at the suit and looks where the eye looks (local east-north-up x suit x eye), with
   1.62 x the screen's field; the last pass warps it through the ball (screen pixel -> ray from the eye -> ball point
@@ -89,7 +103,7 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
   Rendered at 1.3 x the screen (DPR capped 1.5), stepping down by 0.15 (to 0.6) while frames average over 21 ms.
 - **Loading**: `#loading` counts the nine loads in; if the module or a library can't load, it says THE WORLD
   COULDN'T LOAD and the cockpit runs on. `SITE5.world` = { ready, cloudsReady, light, exposure, loads, camera,
-  srcTan }; `SITE5.warp(x, y)` is the warp in JS; `SITE5.horizonDip(alt)`.
+  srcTan, time, cityGlowAt, tiles, heightAt }; `SITE5.warp(x, y)` is the warp in JS; `SITE5.horizonDip(alt)`.
 - Not yet (later phases): a sharper night-lights map (500 m), the cockpit relit by this world (Phase 3),
   the aircraft as 3D models (Phase 4; until then only their HUD marks).
 
@@ -114,7 +128,9 @@ within 2.5% of where that frame has them, on a 16:9 screen in the still (reduced
   outside, the whole way round, points toward the nose; a plate on each at eye level.
 - **The centre**: heading ticks at el 22 across +-12 deg that scroll with the heading (one a degree, taller every 5,
   tallest every 10, fading at the ends) under a
-  fixed caret, and the nose designator at el -10 (salmon bars, dash text, a small V). The pitch ladder, the
+  fixed caret; under the caret the speed (`… KM/H`, `parts.speedText`) and under that, in the same style, where the
+  suit is: `40.92°N 14.95°E · ALT 18.4 KM` (2 decimals, S/W when negative, ALT to 0.1 km under 100 km and whole km
+  above; `parts.posText`); and the nose designator at el -10 (salmon bars, dash text, a small V). The pitch ladder, the
   centre line, the slashes, the frame dashes and the dotted lead arc were removed (owner, 2026-10-05).
 - **The cluster** under the nose, scaled by `SZ` about its centre (el -27), from the frame's (el -24 .. -36): V, dash text, caret, salmon caret, a salmon triangle plate;
   sized up by what each holds (owner, 2026-10-05): the badges (radar, thrust vector) 3.5 at +-11.8, the bar plates 4

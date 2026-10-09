@@ -4,7 +4,7 @@
    and resize() when the picture changes size. Only the main camera drives the level of detail; the monitor
    capture's cameras see whatever it has loaded.
    makeEarth3D({ scene, camera, renderer, token, onFail }) -> { update, resize, state: { on, loaded, failed }, tiles,
-   heightAt(latDeg, lonDeg), setNight(map, intensity) }. On an auth or root-tileset failure it calls onFail() once and takes the tiles away. */
+   heightAt(latDeg, lonDeg), setNight(map, intensity, sunDir, lightDir) }. On an auth or root-tileset failure it calls onFail() once and takes the tiles away. */
 import * as THREE from 'three'
 import { TilesRenderer } from '3d-tiles-renderer'
 import { CesiumIonAuthPlugin, GLTFExtensionsPlugin, TileCompressionPlugin } from '3d-tiles-renderer/plugins'
@@ -19,21 +19,44 @@ const D = Math.PI / 180, TOP = 12000   // heightAt casts down from 12 km
 // a tile's material: its photo, lit by the scene's lights (Takram's sun light and sky light probe) like the flat
 // Earth, instead of the unlit material the tiles arrive with. (The photo keeps its own baked daylight shading.)
 // At night the city lights glow on it as on the flat Earth: NASA's Black Marble, looked up by the fragment's geodetic
-// latitude and longitude (Bowring's formula on WGS84), in today's earthMat.emissive colour. The uniforms are shared,
-// so setNight() reaches every tile at once.
+// latitude and longitude (Bowring's formula on WGS84), in today's earthMat.emissive colour, and only where it's dark on
+// the ground: scaled by 1 - smoothstep(-6, +2 deg) of the sun's elevation over that point's horizon (the ellipsoid
+// normal), as on the flat Earth (sky.js; SITE5.world.cityGlowAt in JS). The uniforms are shared, so setNight() reaches
+// every tile at once.
+// The scene's light (the sun, or the moon standing in for it) is worked out up where the suit is, where at dusk it is
+// still up while the ground below lies in the Earth's shadow: a tile's steep faces (cliffs, walls, tile edges) facing
+// it then lit up pink-white on the night side (owner 2026-10-08: "what are these white streaks?"). So a point takes
+// the direct light only while that light is over its own horizon (uLightDir, a half-degree soft edge).
 // (the dispose-model handler below disposes it with the tile, the photo included)
-const night = { uNight: { value: null }, uNightK: { value: 0 }, uNightC: { value: new THREE.Color(0xffd9a8) } }
+const night = { uNight: { value: null }, uNightK: { value: 0 }, uNightC: { value: new THREE.Color(0xffd9a8) }, uNightSun: { value: new THREE.Vector3(0, 0, 1) }, uLightDir: { value: new THREE.Vector3(0, 0, 1) } }
+const GEO = `varying vec3 vNightW;
+uniform sampler2D uNight;
+uniform float uNightK;
+uniform vec3 uNightC;
+uniform vec3 uNightSun;
+uniform vec3 uLightDir;
+// a world (ECEF) point's geodetic latitude and longitude (Bowring's formula, WGS84); returns its ellipsoid normal
+vec3 nightGeo(vec3 w, out float lat, out float lon) {
+  const float A = 6378137.0, B = 6356752.314245, E2 = 0.00669437999014, EP2 = 0.00673949674228;
+  float p = length(w.xy), th = atan(w.z * A, p * B), st = sin(th), ct = cos(th);
+  lat = atan(w.z + EP2 * B * st * st * st, p - E2 * A * ct * ct * ct); lon = atan(w.y, w.x);
+  return vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
+}
+`
 function nightPatch(s) {
   Object.assign(s.uniforms, night)
   s.vertexShader = 'varying vec3 vNightW;\n' + s.vertexShader.replace('#include <project_vertex>',
     '#include <project_vertex>\nvNightW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
-  s.fragmentShader = 'varying vec3 vNightW;\nuniform sampler2D uNight;\nuniform float uNightK;\nuniform vec3 uNightC;\n' +
-    s.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  s.fragmentShader = GEO + s.fragmentShader.replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
     {
-      const float A = 6378137.0, B = 6356752.314245, E2 = 0.00669437999014, EP2 = 0.00673949674228;
-      float p = length(vNightW.xy), th = atan(vNightW.z * A, p * B), st = sin(th), ct = cos(th);
-      float lat = atan(vNightW.z + EP2 * B * st * st * st, p - E2 * A * ct * ct * ct), lon = atan(vNightW.y, vNightW.x);
-      totalEmissiveRadiance += uNightK * uNightC * texture2D(uNight, vec2(lon / 6.283185307 + 0.5, lat / 3.141592654 + 0.5)).rgb;
+      float lat, lon; vec3 nUp = nightGeo(vNightW, lat, lon);
+      float lit = smoothstep(-0.0087, 0.0087, dot(nUp, uLightDir));
+      reflectedLight.directDiffuse *= lit; reflectedLight.directSpecular *= lit;
+    }`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+    {
+      float lat, lon; vec3 nUp = nightGeo(vNightW, lat, lon);
+      float dark = 1.0 - smoothstep(-0.104719755, 0.034906585, asin(clamp(dot(nUp, uNightSun), -1.0, 1.0)));
+      totalEmissiveRadiance += dark * uNightK * uNightC * texture2D(uNight, vec2(lon / 6.283185307 + 0.5, lat / 3.141592654 + 0.5)).rgb;
     }`)
 }
 function tileMaterial(m) {
@@ -113,8 +136,9 @@ export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
     state, tiles,
     update() { if (!state.failed) { tiles.update(); updateCredit() } },
     resize() { if (!state.failed) tiles.setResolutionFromRenderer(camera, renderer) },
-    // the city lights: the Black Marble map (null until it loads) and their strength (sky.js: CITY / exposure)
-    setNight(map, k) { night.uNight.value = map; night.uNightK.value = map ? k : 0 },
+    // the city lights: the Black Marble map (null until it loads), their strength (sky.js: CITY / exposure) and the
+    // real sun's direction (ECEF, unit; never the moon's) that gates them
+    setNight(map, k, sunDir, lightDir) { night.uNight.value = map; night.uNightK.value = map ? k : 0; night.uNightSun.value.copy(sunDir); night.uLightDir.value.copy(lightDir || sunDir) },
     // the height above the WGS84 ellipsoid: a ray down the ellipsoid's normal from TOP, so the height is TOP less the
     // distance to the first hit (null where nothing is loaded under it)
     heightAt(lat, lon) {

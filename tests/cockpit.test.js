@@ -7,7 +7,7 @@ const serve = require('./serve');
 // opened from a local server rooted at the repo
 let srv = null;
 // ONLY=main,3d,... runs just those blocks (main, altitude, modes, traffic, controls, horizon, world, light, 3d,
-// capture, seatlight, reduce, phone); unset, everything runs
+// capture, seatlight, reduce, phone, hud, time); unset, everything runs
 const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null, want = n => !ONLY || ONLY.includes(n);
 async function launch(o) {
   const p = await launchFile(o);
@@ -74,7 +74,7 @@ async function ready(p) {
   {
     const q0 = JSON.parse(await pose(p, 'JSON.stringify(s.pos)')); await p.sleep(2000); const q1 = JSON.parse(await pose(p, 'JSON.stringify(s.pos)'));
     const moved = Math.hypot(q1[0] - q0[0], q1[1] - q0[1], q1[2] - q0[2]);
-    check("the suit flies at the throttle's speed", moved > 0.8 && moved < 1.2, moved.toFixed(3) + ' km in 2s at 0.5 km/s');
+    check("the suit flies at the throttle's speed", moved > 4 && moved < 6, moved.toFixed(3) + ' km in 2s at 2.5 km/s');
   }
   // keys take it over (MANUAL) and turn it; it hands back after 4s
   const cl = () => p.eval('JSON.stringify(SITE5.parts.cluster)').then(JSON.parse);
@@ -272,22 +272,22 @@ async function ready(p) {
     await a.goto(PAGE, 300); await ready(a);
     const al0 = await pose(a, 's.alt'); await hold('ArrowUp', 'ArrowUp', 38, 2000);
     check('climbing raises the altitude', (await pose(a, 's.alt')) - al0 > 0.2, al0.toFixed(2) + ' -> ' + (await pose(a, 's.alt')).toFixed(2));
-    await a.goto('../site5/index.html?seed=7&mode=hybrid&alt=99.8', 300); await ready(a); await hold('ArrowUp', 'ArrowUp', 38, 3000);
+    await a.goto('../site5/index.html?seed=7&mode=hybrid&alt=999.8', 300); await ready(a); await hold('ArrowUp', 'ArrowUp', 38, 3000);
     const hi = await pose(a, 's.alt');
     await a.goto('../site5/index.html?seed=7&mode=hybrid&alt=1.2', 300); await ready(a); await hold('ArrowDown', 'ArrowDown', 40, 3000);
     const lo = await pose(a, 's.alt');
-    check('the floor and ceiling hold', Number.isFinite(hi) && hi <= 100 && Number.isFinite(lo) && lo >= 1, JSON.stringify([hi, lo]));
-    // on the real globe: cruise is 2 km/s; north raises the latitude by the distance over 111.2 km a degree; the date line wraps
-    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&hdg=0', 300); await ready(a);
+    check('the floor and ceiling hold', Number.isFinite(hi) && hi <= 1000 && Number.isFinite(lo) && lo >= 1, JSON.stringify([hi, lo]));
+    // on the real globe: cruise is 10 km/s; north raises the latitude by the distance over 111.2 km a degree; the date line wraps
+    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&hdg=0&alt=18', 300); await ready(a);
     const q0 = JSON.parse(await pose(a, 'JSON.stringify(s.pos)')), g0 = JSON.parse(await pose(a, 'JSON.stringify(s.geo)')); await a.sleep(2000);
     const q1 = JSON.parse(await pose(a, 'JSON.stringify(s.pos)')); const mv = Math.hypot(q1[0] - q0[0], q1[2] - q0[2]);
-    check('the suit cruises at 2 km/s', mv > 3.4 && mv < 4.6, mv.toFixed(2) + ' km in 2s');
+    check('the suit cruises at 10 km/s', mv > 17 && mv < 23, mv.toFixed(2) + ' km in 2s');
     await a.sleep(8000); const g1 = JSON.parse(await pose(a, 'JSON.stringify(s.geo)')), north = (g1[0] - g0[0]) * 111.2;
     const flown = Math.hypot(...[0, 2].map(i => JSON.parse(JSON.stringify(q1))[i]));
-    check('north raises the latitude', north > 17 && north < 23 && Math.abs(g1[1] - g0[1]) < 0.01, JSON.stringify({ g0, g1, north }));
-    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&lon=179.99&hdg=90', 300); await ready(a); await a.sleep(3000);
+    check('north raises the latitude', north > 85 && north < 115 && Math.abs(g1[1] - g0[1]) < 0.01, JSON.stringify({ g0, g1, north }));
+    await a.goto('../site5/index.html?seed=7&mode=input&traffic=0&lon=179.99&hdg=90&alt=18', 300); await ready(a); await a.sleep(3000);
     const gd = JSON.parse(await pose(a, 'JSON.stringify(s.geo)'));
-    check('the date line wraps', Number.isFinite(gd[1]) && gd[1] > -180 && gd[1] < -179.9, JSON.stringify(gd));
+    check('the date line wraps', Number.isFinite(gd[1]) && gd[1] > -180 && gd[1] < -179, JSON.stringify(gd));
     await a.goto(PAGE + '&traffic=0', 300); await ready(a); await a.sleep(2000);
     check('targeting with no contacts', a.errors.length === 0 && (await pose(a, 's.lockId')) === null && (await pose(a, 's.contacts.length')) === 0, a.errors.join(' | '));
     a.close();
@@ -296,7 +296,7 @@ async function ready(p) {
   // three modes: FREE watches (keys don't fly), HYBRID shares, INPUT is yours (let go and it holds course)
   if (want('modes')) {
     const q = await launch({ width: 1200, height: 700 });
-    const BASE = '../site5/index.html?seed=7&hdg=0';
+    const BASE = '../site5/index.html?seed=7&hdg=0&alt=18';
     const key = (type, k, code, vk) => q.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk });
     const left = on => key(on ? 'keyDown' : 'keyUp', 'ArrowLeft', 'ArrowLeft', 37);
     const press = async (k, code, vk) => { await key('keyDown', k, code, vk); await key('keyUp', k, code, vk); await q.sleep(60); };
@@ -353,17 +353,17 @@ async function ready(p) {
     const key = (type, kk, code, vk, mods) => k.send('Input.dispatchKeyEvent', { type, key: kk, code, windowsVirtualKeyCode: vk, modifiers: mods || 0 });
     const hold = async (kk, code, vk, ms, mods) => { await key('keyDown', kk, code, vk, mods); await k.sleep(ms); await key('keyUp', kk, code, vk, mods); };
     const turned = h0 => pose(k, 's.heading').then(h => ((h - h0 + 540) % 360) - 180);
-    await k.goto('../site5/index.html?seed=7&mode=input', 300); await ready(k); await k.sleep(500);
+    await k.goto('../site5/index.html?seed=7&mode=input&alt=18', 300); await ready(k); await k.sleep(500);
     const sp0 = await pose(k, 's.speed');
     await hold('w', 'KeyW', 87, 1200);
     const spUp = await pose(k, 's.speed'); await k.sleep(1000); const spKept = await pose(k, 's.speed');
-    check('W raises the throttle and it stays', spUp > sp0 + 0.08 && spKept > sp0 + 0.08, JSON.stringify([sp0, spUp, spKept]));
+    check('W raises the throttle and it stays', spUp > sp0 + 0.4 && spKept > sp0 + 0.4, JSON.stringify([sp0, spUp, spKept]));
     await hold('s', 'KeyS', 83, 2500); await k.sleep(800);
     const spDown = await pose(k, 's.speed');
-    check('S lowers it', spDown < sp0 - 0.05, JSON.stringify([sp0, spDown]));
+    check('S lowers it', spDown < sp0 - 0.25, JSON.stringify([sp0, spDown]));
     const spPre = await pose(k, 's.speed'); await key('keyDown', 'Shift', 'ShiftLeft', 16, 8); await k.sleep(1500); const spB = await pose(k, 's.speed'); const boosting = await pose(k, 's.boost'); const lever = await k.eval('SITE5.parts.controlsL.boost');
     await key('keyUp', 'Shift', 'ShiftLeft', 16); await k.sleep(2500); const spAfter = await pose(k, 's.speed');
-    check("Shift boosts while held, the left ring's boost lever in", spB > spPre + 0.2 && boosting && lever > 0.5 && spAfter < spB - 0.15, JSON.stringify([spPre, spB, boosting, lever, spAfter]));
+    check("Shift boosts while held, the left ring's boost lever in", spB > spPre + 1 && boosting && lever > 0.5 && spAfter < spB - 0.75, JSON.stringify([spPre, spB, boosting, lever, spAfter]));
     check('the HUD shows the speed', /KM\/H/.test(await k.eval('SITE5.parts.speedText || ""')), await k.eval('SITE5.parts.speedText || ""'));
     check('the left ring\'s throttle follows it', Math.abs((await k.eval('SITE5.parts.controlsL.twist')) - (await pose(k, 's.throttle'))) < 0.15,
       JSON.stringify([await k.eval('SITE5.parts.controlsL.twist'), await pose(k, 's.throttle')]));
@@ -386,11 +386,16 @@ async function ready(p) {
     h0 = await pose(k, 's.heading'); await hold('d', 'KeyD', 68, 1000); const dTurn = await turned(h0);
     await k.sleep(600); h0 = await pose(k, 's.heading'); await hold('e', 'KeyE', 69, 1000); const eTurn = await turned(h0);
     check('D banks into a right turn, E yaws right more gently', dTurn > 30 && eTurn > 8 && eTurn < dTurn, JSON.stringify({ dTurn, eTurn }));
-    await k.goto('../site5/index.html?seed=7&mode=free', 300); await ready(k); await k.sleep(500);
+    await k.goto('../site5/index.html?seed=7&mode=free&alt=18', 300); await ready(k); await k.sleep(500);
     await k.mouse('mouseMoved', 1150, 350); let auto = true;
     for (let i = 0; i < 8; i++) { await k.sleep(100); if ((await pose(k, 's.pilot')) !== 'AUTO') auto = false; }
     const thr0 = await pose(k, 's.throttle'); await hold('w', 'KeyW', 87, 600);
     check('FREE: the mouse and throttle do nothing', auto && (await pose(k, 's.throttle')) === thr0, JSON.stringify({ auto, thr0 }));
+    {   // 5x faster (owner, 2026-10-08): full throttle is 40 km/s
+      const p = k;
+      await p.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(p); await p.sleep(5000);
+      check('5x: full throttle is about 40 km/s', Math.abs((await pose(p, 's.speed')) - 40) < 2, String(await pose(p, 's.speed')));
+    }
     check('controls: no JS errors', k.errors.length === 0, k.errors.join(' | '));
     k.close();
   }
@@ -413,7 +418,7 @@ async function ready(p) {
   if (want('world')) {
     const v = await launch({ width: 1440, height: 810, reduce: true });
     const worldUp = async () => { for (let i = 0; i < 120 && !(await v.eval('!!(SITE5.world && SITE5.world.ready)')); i++) await v.sleep(500); };
-    await v.goto('../site5/index.html?seed=7&traffic=0', 300); await ready(v); await worldUp(); await v.sleep(1500);
+    await v.goto('../site5/index.html?seed=7&traffic=0&alt=18', 300); await ready(v); await worldUp(); await v.sleep(1500);
     check('the world is up', await v.eval('!!(SITE5.world && SITE5.world.ready)') && v.errors.length === 0, v.errors.join(' | '));
     // WGS84 geodetic -> ECEF (m), and the eye's forward in ECEF, worked out here independently of sky.js
     const cam = JSON.parse(await v.eval(`(() => { const s = SITE5.pose, m = SITE5.m, D = Math.PI / 180, a = 6378137, e2 = 6.69437999014e-3;
@@ -452,6 +457,17 @@ async function ready(p) {
     check('the world holds its frame time (avg under 33ms)', (await v.eval('SITE5.frameMs')) < 33, (await v.eval('SITE5.frameMs')).toFixed(1) + 'ms');
     check('world: no JS errors', v.errors.length === 0, v.errors.join(' | '));
     v.close();
+    // the start (owner, 2026-10-08): 400 km up, a 1000 km ceiling, and the monitor meters the Earth, not black space
+    const p = await launch({ width: 1440, height: 810 });
+    await p.goto('../site5/index.html?seed=7', 300); await ready(p); await p.sleep(1000);
+    check('starts at 400 km', Math.abs((await pose(p, 's.alt')) - 400) < 5, String(await pose(p, 's.alt')));
+    await p.goto('../site5/index.html?seed=7&alt=5000', 300); await ready(p); await p.sleep(500);
+    check('the ceiling is 1000 km', (await pose(p, 's.alt')) <= 1000.5, String(await pose(p, 's.alt')));
+    await p.goto('../site5/index.html?seed=7&time=2026-10-08T11:00:00Z', 300); await ready(p); await p.sleep(8000);
+    const blown = await p.eval(`new Promise(r => requestAnimationFrame(() => { const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h); g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0, t = 0; for (let i = 0; i < px.length; i += 4 * 13) { t++; if (px[i] > 248 && px[i + 1] > 248 && px[i + 2] > 248) n++; } r(n / t); }))`);
+    check('from 400 km the horizon is not blown out (under 1% pure white)', blown < 0.01, (blown * 100).toFixed(2) + '%');
+    check('start: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    p.close();
   }
 
   // the world's light and clouds: dusk glows in the west; the volumetric clouds load; on a moonless night the cities
@@ -459,7 +475,7 @@ async function ready(p) {
   if (want('light')) {
     const v = await launch({ width: 1440, height: 810, reduce: true });
     const wait = async (expr, n = 120) => { for (let i = 0; i < n && !(await v.eval(expr)); i++) await v.sleep(500); return v.eval(expr); };
-    await v.goto('../site5/index.html?seed=7&traffic=0&clouds=1', 300); await ready(v);   // (the clouds are off unless asked for)
+    await v.goto('../site5/index.html?seed=7&traffic=0&clouds=1&alt=18', 300); await ready(v);   // (the clouds are off unless asked for)
     const clouds = await wait('!!(SITE5.world && SITE5.world.cloudsReady)'); await v.sleep(2500);
     check('clouds draw', clouds, JSON.stringify(await v.eval('SITE5.world && SITE5.world.loads')));
     const best = JSON.parse(await inFrame(v, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * h);
@@ -467,7 +483,7 @@ async function ready(p) {
       for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > b[0] + b[1] + b[2]) b = [px[i], px[i + 1], px[i + 2]]; r(JSON.stringify(b)); `, '["no frame"]'));
     check('the sky is lit at dusk, warm in the west', best[0] > 60 && best[0] > best[2], JSON.stringify(best));
     check('the loading readout goes once the world is in', await v.eval('document.getElementById("loading").hidden'));
-    await v.goto('../site5/index.html?seed=7&traffic=0', 300); await ready(v);
+    await v.goto('../site5/index.html?seed=7&traffic=0&alt=18', 300); await ready(v);
     check('the clouds are off by default', !(await v.eval('SITE5.world.cloudsReady || SITE5.envClouds')));
     // the monitor meters its picture like a camera: deep in the twilight (the default start, sun -6.7 deg) it opens
     // up instead of showing black
@@ -475,7 +491,7 @@ async function ready(p) {
     const dim = await inFrame(v, ` const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
       g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let s = 0, n = 0; for (let i = 0; i < px.length; i += 4 * 97) { s += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255; n++; } r(s / n); `, NaN);
     check('deep twilight is visible, not black: the monitor opens up', dim > 0.05, (dim * 100).toFixed(1) + '% mean, exposure ' + (await v.eval('SITE5.world.exposure')).toFixed(0));
-    await v.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&time=2026-10-08T22:00:00Z', 300); await ready(v);
+    await v.goto('../site5/index.html?seed=7&traffic=0&lat=40.85&lon=14.27&alt=18&time=2026-10-08T22:00:00Z', 300); await ready(v);
     await v.sleep(2500);
     await v.mouse('mousePressed', 720, 760, 1); for (let y = 760; y >= 300; y -= 20) await v.mouse('mouseMoved', 720, y, 1);
     await v.sleep(1500);
@@ -483,6 +499,13 @@ async function ready(p) {
       g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
     await v.mouse('mouseReleased', 720, 300);
     check('a moonless night still shows the cities', warm > 0.002, (warm * 100).toFixed(2) + '% warm');
+    // city lights only where it's dark on the ground (the sun's elevation there, -6..+2 deg)
+    await v.goto('../site5/index.html?seed=7&lat=40.85&lon=14.27&alt=10&time=2026-10-08T11:00:00Z', 300); await ready(v); await v.sleep(1500);
+    check('no city glow where the sun is up (noon, Naples)', (await v.eval('SITE5.world.cityGlowAt(40.85, 14.27)')) === 0);
+    await v.goto('../site5/index.html?seed=7&lat=40.85&lon=14.27&alt=10&time=2026-10-08T22:00:00Z', 300); await ready(v); await v.sleep(1500);
+    check('full city glow in the night (22:00, Naples)', (await v.eval('SITE5.world.cityGlowAt(40.85, 14.27)')) === 1);
+    await v.goto('../site5/index.html?seed=7&lat=40.85&lon=14.27&alt=10&time=2026-10-08T16:10:00Z', 300); await ready(v); await v.sleep(1500);
+    check('dusk (16:10Z, sun +3.6 deg): still sunlit on the ground there, no glow yet', (await v.eval('SITE5.world.cityGlowAt(40.85, 14.27)')) < 0.05, String(await v.eval('SITE5.world.cityGlowAt(40.85, 14.27)')));
     check('light and clouds: no JS errors', v.errors.length === 0, v.errors.join(' | '));
     v.close();
     const z = await launch({ width: 1200, height: 700 });
@@ -500,9 +523,22 @@ async function ready(p) {
     const skip = n => console.log('SKIP ' + n + ' (no key)');
     const t = await launch({ width: 1280, height: 720 });
     if (KEY) {
-      await t.goto('../site5/index.html?seed=7', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&alt=18', 300); await ready(t);
       for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
       check('the 3D Earth streams in', await t.eval('SITE5.world.tiles.on && SITE5.world.tiles.loaded > 20 && !SITE5.world.tiles.failed'), JSON.stringify(await t.eval('SITE5.world.tiles')));
+      // the cracks between tiles show the fallback Earth under them; the deeper it is, the brighter the haze in a crack
+      // (at 1 km down they showed as streaks): it stays just under the lowest sea surface
+      check('the fallback Earth sits just under the tiles (no haze streaks in the cracks)', await t.eval('SITE5.world.earthDrop >= 110 && SITE5.world.earthDrop <= 200'), String(await t.eval('SITE5.world.earthDrop')));
+      // at dusk from 80 km the sun is still up where the suit is but the ground below is in the Earth's shadow: the
+      // tiles' steep faces mustn't catch it (they showed as pink-white streaks, 151 of these slivers before the fix).
+      // Counted on the world's canvas alone (no HUD, no seat): a bright pixel standing well above both its neighbours
+      await t.goto('../site5/index.html?seed=7&alt=80&throttle=0&mode=input', 300); await ready(t);
+      for (let i = 0; i < 80 && !(await t.eval('SITE5.world.tiles.loaded > 20')); i++) await t.sleep(250);
+      await t.sleep(6000);
+      const slivers = await inFrame(t, `const g = SITE5.gl, w = g.drawingBufferWidth, h = g.drawingBufferHeight, px = new Uint8Array(4 * w * h);
+        g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); const L = (x, y) => { const i = 4 * (y * w + x); return 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]; };
+        let c = 0; for (let y = 2; y < Math.floor(h * 0.42); y += 2) for (let x = 12; x < w - 12; x += 2) { const v = L(x, y); if (v > 110 && v - L(x - 10, y) > 45 && v - L(x + 10, y) > 45) c++; } r(c);`, -1);
+      check('no sunlit streaks on the night side (dusk, 80 km)', slivers >= 0 && slivers < 30, slivers + ' slivers');
       await t.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await t.sleep(3000);
       check('after a resize the tiles keep loading, no errors', (await t.eval('SITE5.world.tiles.loaded')) > 20 && t.errors.length === 0, t.errors.join(' | '));
       await t.send('Emulation.clearDeviceMetricsOverride', {});
@@ -521,14 +557,14 @@ async function ready(p) {
         g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, px); let n = 0; for (let i = 0; i < px.length; i += 4 * 9) if (px[i] > 40 && px[i] - px[i + 2] > 20) n++; r(n / (px.length / 36)); `, NaN);
       await t.mouse('mouseReleased', 640, 250);
       check('the cities glow on the 3D Earth at night', warm > 0.2, (warm * 100).toFixed(2) + '% warm');
-      await t.goto('../site5/index.html?seed=7', 300); await ready(t); await t.sleep(4000);
+      await t.goto('../site5/index.html?seed=7&alt=18', 300); await ready(t); await t.sleep(4000);
       check("Google's attribution shows with the tiles", /google/i.test(await t.eval('document.getElementById("attrib").textContent')), await t.eval('document.getElementById("attrib").textContent'));
       // (ion's required credits: both logos, the Google one once, the ion one inside its link, and only the links take the mouse)
       check("the Google and Cesium ion logos show, linked and sized", await t.eval('(() => { const q = s => document.querySelectorAll("#attrib " + s); const g = q("img[alt=Google]"), c = q("a[href=\\"https://cesium.com\\"] img[alt=\\"Cesium ion\\"]"); return g.length === 1 && c.length === 1 && q("a[href=\\"https://cesium.com/pricing/\\"]").length === 1 && g[0].height === 14 && getComputedStyle(document.getElementById("attrib")).pointerEvents === "none" && getComputedStyle(c[0].parentNode).pointerEvents === "auto"; })()'), await t.eval('document.getElementById("attrib").innerHTML.length'));
       await t.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await t.sleep(800);
       check('the full credit fits a 375 px phone', await t.eval('(() => { const a = document.getElementById("attrib").getBoundingClientRect(); return a.width > 0 && a.left >= 0 && a.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; })()'));
       await t.send('Emulation.clearDeviceMetricsOverride', {});
-      await t.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(t);
+      await t.goto('../site5/index.html?seed=7&mode=input&throttle=1&alt=18', 300); await ready(t);
       await t.sleep(3000); const mem0 = await t.eval('SITE5.world.renderer.info.memory.textures');
       await t.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 }); await t.sleep(30000);
       await t.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
@@ -640,6 +676,41 @@ async function ready(p) {
     const tk = JSON.parse(await r.eval('JSON.stringify(SITE5.parts.railTicks || null)'));
     check('the rail\'s ticks sit evenly between the caps', !!tk && Math.abs(tk[0] + tk[1] - 360) < 0.01, JSON.stringify(tk));
     r.close();
+  }
+
+  // the position readout, under the speed
+  if (want('hud')) {
+    const p = await launch({ width: 1440, height: 900 });
+    await p.goto(PAGE, 300); await ready(p);
+    check('the HUD reads out position and height', /^\d{1,2}\.\d\d°[NS] \d{1,3}\.\d\d°[EW] · ALT \d+(\.\d)? KM$/.test(await p.eval('SITE5.parts.posText')), await p.eval('SITE5.parts.posText'));
+    check('hud: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    p.close();
+  }
+
+  // the time controller: ] faster, [ slower (to a pause), \ back to now; #time shows the local time and the rate
+  if (want('time')) {
+    const p = await launch({ width: 1440, height: 900 });
+    await p.goto('../site5/index.html?seed=7', 300); await ready(p);
+    const k = async (key, code) => { for (const type of ['keyDown', 'keyUp']) await p.send('Input.dispatchKeyEvent', { type, key, code }); };
+    await k(']', 'BracketRight'); await k(']', 'BracketRight');
+    check('] speeds time up (1 -> 60 -> 600)', (await p.eval('SITE5.world.time.rate')) === 600);
+    const d0 = await p.eval('SITE5.world.time.date.getTime()'); await p.sleep(2000); const d1 = await p.eval('SITE5.world.time.date.getTime()');
+    check('at x600 two seconds move the world about 20 minutes', (d1 - d0) / 60000 > 15 && (d1 - d0) / 60000 < 30, ((d1 - d0) / 60000).toFixed(1) + ' min');
+    await k('\\', 'Backslash');
+    check('\\ resets the clock', (await p.eval('SITE5.world.time.rate')) === 1);
+    check('the time readout shows local time and the rate', /^\d\d:\d\d LOCAL · ×1$/.test(await p.eval('document.getElementById("time").textContent')), await p.eval('document.getElementById("time").textContent'));
+    // (beyond the brief's checks: [ stops at a pause, a tap cycles and wraps, and the readout fits a phone)
+    await k('[', 'BracketLeft'); await k('[', 'BracketLeft');
+    check('[ slows time to a pause and stops there', (await p.eval('SITE5.world.time.rate')) === 0 && /⏸/.test(await p.eval('document.getElementById("time").textContent')), await p.eval('document.getElementById("time").textContent'));
+    const taps = []; for (let i = 0; i < 5; i++) { await p.eval('document.getElementById("time").click()'); taps.push(await p.eval('SITE5.world.time.rate')); }
+    check('tapping the readout cycles the rate, wrapping', taps.join() === '1,60,600,3600,0', taps.join());
+    await p.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true }); await p.sleep(800);
+    check('#time sits clear of #mode and #attrib at 375 px', await p.eval(`(() => { const e = document.getElementById("attrib"); if (!e.textContent) e.textContent = "Google; Data SIO, NOAA, U.S. Navy, NGA, GEBCO; IBCAO; Landsat / Copernicus · Airbus";
+      const r = id => document.getElementById(id).getBoundingClientRect(), t = r("time"), hit = o => !(t.right <= o.left || o.right <= t.left || t.bottom <= o.top || o.bottom <= t.top);
+      return t.width > 0 && t.left >= 0 && t.right <= innerWidth && !hit(r("mode")) && !hit(r("attrib")) && document.documentElement.scrollWidth <= innerWidth; })()`),
+      await p.eval('JSON.stringify(["time", "mode", "attrib"].map(id => document.getElementById(id).getBoundingClientRect()))'));
+    check('time: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    p.close();
   }
 
   // phones

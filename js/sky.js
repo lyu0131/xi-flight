@@ -13,8 +13,8 @@
    ~400 000 times dimmer), the exposure falls to night levels and the city lights (NASA's Black Marble, emissive
    on the ground) and the stars (the Yale bright-star catalogue) are kept at their apparent brightness. Volumetric
    clouds (Takram), lit by the same light, cast their shadows and sit in the air.
-   SITE5.world = { ready, cloudsReady, light, exposure, loads, camera, renderer, srcTan, tiles, heightAt } (tiles and
-   heightAt: the 3D Earth, earth3d.js); SITE5.gl is its WebGL
+   SITE5.world = { ready, cloudsReady, light, exposure, loads, camera, renderer, srcTan, tiles, heightAt, time: { rate,
+   date }, cityGlowAt(lat, lon) } (tiles and heightAt: the 3D Earth, earth3d.js); SITE5.gl is its WebGL
    context; SITE5.warp(x, y) is the warp in JS (screen px -> picture uv, or null); SITE5.horizonDip(altKm).
    It also captures the monitor for the seat's light (see capture(), at the end): SITE5.env, SITE5.envFreeze,
    SITE5.envClouds; SITE5.loaded(k) is the loading readout's tick. */
@@ -59,9 +59,22 @@ const scene = new THREE.Scene()
 // air (Takram's sun light and sky light probe), NASA's land and sea colour on it and its city lights glowing
 const earthGeo = new THREE.SphereGeometry(1, 720, 360); earthGeo.rotateX(Math.PI / 2)
 const earthMat = new THREE.MeshStandardMaterial({ color: 0x24303c, roughness: 0.92, metalness: 0, emissive: 0x000000 })
-// (1 km below the WGS84 surface: under the 3D tiles it fills their gaps while they stream in, and with no tiles it
-// is the whole Earth. Coarse distant tiles are flat chords that sag up to ~400 m under the curve, so it sits well below)
-const earth = new THREE.Mesh(earthGeo, earthMat); earth.scale.set(6378137 - 1000, 6378137 - 1000, 6356752.314245 - 1000); scene.add(earth)
+// its city lights glow only where it's dark on the ground, as on the tiles (earth3d.js): x 1 - smoothstep(-6, +2 deg)
+// of the real sun's elevation over each point (up: the point's normalised position; never the moon's)
+const cityU = { uCitySun: { value: new THREE.Vector3(0, 0, 1) } }
+earthMat.onBeforeCompile = s => {
+  Object.assign(s.uniforms, cityU)
+  s.vertexShader = 'varying vec3 vCityW;\n' + s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvCityW = (modelMatrix * vec4(transformed, 1.0)).xyz;')
+  s.fragmentShader = 'varying vec3 vCityW;\nuniform vec3 uCitySun;\n' + s.fragmentShader.replace('#include <emissivemap_fragment>',
+    '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= 1.0 - smoothstep(-0.104719755, 0.034906585, asin(clamp(dot(normalize(vCityW), uCitySun), -1.0, 1.0)));')
+}
+// (150 m below the WGS84 surface: under the 3D tiles it fills their gaps while they stream in, and with no tiles it
+// is the whole Earth. It sits just under the lowest sea surface (the geoid dips to about -106 m), no deeper: through
+// the hairline cracks between tiles the eye reaches it, and the deeper it is the longer that ray runs through the air
+// and the brighter the crack glows -- at 1 km down the cracks showed as streaks of haze, owner 2026-10-08. Coarse
+// far tiles that sag below it near the horizon let it show there, which reads as the same dark ground)
+const EARTH_DROP = 150; world.earthDrop = EARTH_DROP
+const earth = new THREE.Mesh(earthGeo, earthMat); earth.scale.set(6378137 - EARTH_DROP, 6378137 - EARTH_DROP, 6356752.314245 - EARTH_DROP); scene.add(earth)
 const tex = (url, srgb, k, use) => new THREE.TextureLoader().load(url, t => {
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); use(t); loaded(k)
 }, undefined, () => loaded(k, "THE EARTH'S MAPS COULDN'T LOAD"))
@@ -186,6 +199,36 @@ let scale = 1.3 * Math.min(window.devicePixelRatio || 1, 1.5), checkAt = 0, bw =
 const P = new THREE.Vector3(), enu = new THREE.Matrix4(), E = new THREE.Vector3(), N = new THREE.Vector3(), U = new THREE.Vector3()
 const toECEF = l => new THREE.Vector3().addScaledVector(E, l[0]).addScaledVector(U, l[1]).addScaledVector(N, l[2])
 const sun = new THREE.Vector3(), moon = new THREE.Vector3(), light = new THREE.Vector3(), eci = new THREE.Matrix4()
+// the city lights' darkness factor in JS, for the tests: the same gate as the shaders, at a point on the ground now
+world.cityGlowAt = (lat, lon) => {
+  const a = lat * D, b = lon * D, el = Math.asin(Math.max(-1, Math.min(1, Math.cos(a) * Math.cos(b) * sun.x + Math.cos(a) * Math.sin(b) * sun.y + Math.sin(a) * sun.z))) / D
+  const t = Math.max(0, Math.min(1, (el + 6) / 8)); return 1 - t * t * (3 - 2 * t)
+}
+// the world clock (owner, 2026-10-08): START + pose.t + offset. The offset runs at (rate - 1) x real (wall-clock)
+// time, so the rate works under reduced motion too, where pose.t stands still (there neither 0 nor 1 moves it).
+// ] and [ step through RATES (stopping at the ends), \ goes back to x1 and now; the #time button steps on, wrapping.
+const RATES = [0, 1, 60, 600, 3600], timeBtn = document.getElementById('time')
+let offset = 0, lastClock = null
+world.time = { rate: 1, date: START }
+function showTime() {   // HH:MM local mean solar time (UTC + lon / 15 h) and the rate
+  if (!timeBtn) return
+  const r = world.time.rate, l = new Date(world.time.date.getTime() + (S.pose ? S.pose.geo[1] : 0) / 15 * 3600000)
+  const hm = String(l.getUTCHours()).padStart(2, '0') + ':' + String(l.getUTCMinutes()).padStart(2, '0'), say = hm + ' LOCAL · ' + (r ? '×' + r : '⏸')
+  if (timeBtn.textContent === say) return
+  timeBtn.textContent = say
+  timeBtn.setAttribute('aria-label', 'World time ' + hm + ' local, ' + (r ? 'running ' + r + ' times' : 'paused') + '. ] faster, [ slower, \\ back to now.')
+}
+const setRate = r => { world.time.rate = r; showTime() }
+addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]'))) return
+  const i = RATES.indexOf(world.time.rate)
+  if (e.key === ']') setRate(RATES[Math.min(RATES.length - 1, i + 1)])
+  else if (e.key === '[') setRate(RATES[Math.max(0, i - 1)])
+  else if (e.key === '\\') { offset = 0; setRate(1) }
+  else return
+  e.preventDefault()
+})
+if (timeBtn) timeBtn.addEventListener('click', () => setRate(RATES[(RATES.indexOf(world.time.rate) + 1) % RATES.length]))
 // the city lights and stars keep their apparent brightness whatever the exposure (CITY, STAR: at exposure 1)
 const CITY = 0.28, STAR = 1.4   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
 let expo = null, lastT = 0, meterGoal = 0
@@ -207,7 +250,11 @@ S.renderers.push(function (pose, Wd, Hd) {
   // is up, the moon stands in for it everywhere at night exposure; with no moon the sun stays (a dark sky, the cities
   // and the stars). Under the sun the monitor meters its own picture like a camera (see capture()): never below the
   // day's 10, opening up to EXPO_MAX as the twilight dims. The exposure eases over 3 s toward its goal.
-  const date = new Date(START.getTime() + pose.t * 1000)
+  const now = performance.now() / 1000, r = world.time.rate
+  // (a frame's wall time is capped at 0.25 s, so a tab that was hidden doesn't jump the clock on its return)
+  offset += (S.reduce ? Math.max(0, r - 1) : r - 1) * Math.min(0.25, lastClock === null ? 0 : now - lastClock) * 1000; lastClock = now
+  const date = world.time.date = new Date(START.getTime() + pose.t * 1000 + offset)
+  showTime()
   getSunDirectionECEF(date, sun); getMoonDirectionECEF(date, moon)
   const el = v => Math.asin(Math.max(-1, Math.min(1, v.dot(U)))) / D
   const byMoon = el(sun) < -10 && el(moon) > 2
@@ -215,7 +262,6 @@ S.renderers.push(function (pose, Wd, Hd) {
   const goal = byMoon ? 0.45 : meterGoal || 10
   // (a metered goal always eases: it's measured off frames at the exposure before, so snapping to it would swing)
   // (wall-clock time: an eye adapts in real seconds, and the flight's clock stands still under reduced motion)
-  const now = performance.now() / 1000
   expo = expo === null || (S.reduce && !(meterGoal && !byMoon)) ? goal : expo * Math.pow(goal / expo, Math.min(1, Math.max(0, now - lastT) / 3)); lastT = now
   const exposure = world.exposure = expo
   renderer.toneMappingExposure = exposure
@@ -223,7 +269,8 @@ S.renderers.push(function (pose, Wd, Hd) {
   ap.moonDirection && ap.moonDirection.copy(moon)
   sunLight.target.position.copy(P); sunLight.update(); skyLight.position.copy(P); skyLight.update()
   earthMat.emissiveIntensity = CITY / exposure; starsMat.intensity = STAR / exposure
-  if (earth3d) earth3d.setNight(earthMat.emissiveMap, CITY / exposure)   // (the same lights on the tiles)
+  cityU.uCitySun.value.copy(sun)   // (the real sun gates the city lights, even while the moon lights the scene)
+  if (earth3d) earth3d.setNight(earthMat.emissiveMap, CITY / exposure, sun, light)   // (the same lights on the tiles)
   if (stars) { getECIToECEFRotationMatrix(date, eci); stars.setRotationFromMatrix(eci) }
   const U_ = warp.uniforms
   U_.get('uEye').value.set(pose.eye[0], pose.eye[1], pose.eye[2]); U_.get('uEyeM').value.fromArray(mat(pose.eyeQ))
@@ -246,6 +293,18 @@ const FACES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -
 const FACE_UP = [[0, -1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, -1, 0]]
 const seatToECEF = (q, v) => toECEF(m.qrot(q, [v[0], v[1], -v[2]]))   // a seat (Three.js) vector -> ECEF
 let capF = 0, capN = 0, capGot = 0, capFaces = new Array(6)
+// the meter reads only the Earth (owner, 2026-10-08: from 400 km black space filled half the capture and opened the
+// exposure until the ground blew out). Each face's sample directions, in seat axes, worked out once: every 4th pixel
+// (16 bytes, the meter's stride), rows bottom up as readPixels gives them, a 90 deg camera looking along FACES[k] with
+// FACE_UP[k] up (its right is FACES[k] x FACE_UP[k])
+const capDirs = FACES.map((f, k) => {
+  const u = FACE_UP[k], x = [f[1] * u[2] - f[2] * u[1], f[2] * u[0] - f[0] * u[2], f[0] * u[1] - f[1] * u[0]], d = new Float32Array(CS * CS / 4 * 3)
+  for (let i = 0, j = 0; i < CS * CS; i += 4, j += 3) {
+    const nx = (i % CS + 0.5) / CS * 2 - 1, ny = (Math.floor(i / CS) + 0.5) / CS * 2 - 1
+    d.set(m.norm([0, 1, 2].map(a => f[a] + nx * x[a] + ny * u[a])), j)
+  }
+  return d
+})
 const gl = renderer.getContext()
 function capture(pose) {
   const k = capF++ % 6
@@ -260,12 +319,19 @@ function capture(pose) {
     capFaces[k] = buf; capGot |= 1 << k
     if (capGot === 63) {
       capN++
-      // meter: mean luma of the six faces (display values); the goal moves the exposure by the shortfall, display
-      // brightness going about as exposure^(1/2.2)
-      let s = 0, c = 0
-      for (const f of capFaces) for (let i = 0; i < f.length; i += 16) { s += 0.2126 * f[i] + 0.7152 * f[i + 1] + 0.0722 * f[i + 2]; c++ }
-      const mean = Math.max(s / c / 255, 1e-4)
-      meterGoal = Math.min(EXPO_MAX, Math.max(10, world.exposure * Math.pow(METER / mean, 2.2)))
+      // meter: mean luma (display values) of the samples that look at the Earth, below the geometric horizon:
+      // dot(dir, up) < -sin(dip), up being the world's up in seat axes; the goal moves the exposure by the shortfall,
+      // display brightness going about as exposure^(1/2.2). Under 2% Earth (looking out into space): the goal stays.
+      const ps = S.pose, uq = m.qrot(m.qconj(ps.suitQ), [0, 1, 0]), up = [uq[0], uq[1], -uq[2]], lim = -Math.sin(S.horizonDip(ps.alt) * D)
+      let s = 0, c = 0, all = 0
+      capFaces.forEach((f, k) => {
+        const d = capDirs[k]
+        for (let i = 0, j = 0; i < f.length; i += 16, j += 3) {
+          all++
+          if (d[j] * up[0] + d[j + 1] * up[1] + d[j + 2] * up[2] < lim) { s += 0.2126 * f[i] + 0.7152 * f[i + 1] + 0.0722 * f[i + 2]; c++ }
+        }
+      })
+      if (c >= 0.02 * all) meterGoal = Math.min(EXPO_MAX, Math.max(10, world.exposure * Math.pow(METER / Math.max(s / c / 255, 1e-4), 2.2)))
       if (!S.envFreeze) S.env = { n: capN, size: CS, faces: capFaces }
       capFaces = new Array(6); capGot = 0
     }
