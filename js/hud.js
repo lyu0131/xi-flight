@@ -88,7 +88,8 @@
     return m.clamp(Math.sqrt(D0 / Math.sqrt(dx * dx + dy * dy + dz * dz)), 0.85, 1.35);
   }
   S.depthScale = function (p) { return E ? depthScale(p) : 1; };
-  // a polyline through ball points, subdivided every ~1.2 degrees so it follows the sphere
+  // a polyline through ball points, subdivided every ~2 degrees so it follows the sphere (1.2 was 40% more points
+// for no visible difference; the HUD's curves were its biggest cost, profiled 2026-10-09)
   // Short paths (a tick, a cell) take one width from their middle; long ones (the rail, the rings, the ruler
   // circles) are stroked a few segments at a time, each at its own depth, so the weight changes smoothly
   // round the sphere. Round joins keep the pieces seamless.
@@ -105,7 +106,7 @@
         ctx.beginPath(); ctx.lineWidth = LW * depthScale(norm([a[0] + b[0], a[1] + b[1], a[2] + b[2]]));
         if (last) { ctx.moveTo(last[0], last[1]); pen = true; } else pen = false;
       }
-      var ang = Math.acos(m.clamp(m.dot(a, b), -1, 1)), k = Math.max(1, Math.ceil(ang / (1.2 * D)));
+      var ang = Math.acos(m.clamp(m.dot(a, b), -1, 1)), k = Math.max(1, Math.ceil(ang / (2 * D)));
       for (var j = (i === 0 || long) ? 0 : 1; j <= k; j++) {
         var t = j / k, s = project(norm([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]));
         if (!s) { pen = false; last = null; continue; }
@@ -295,7 +296,13 @@
   // outside them, and their dashes slide round with the suit's pitch (1.6 deg of arc per degree), a long one
   // every fifth: climb and they run down past you, dive and they run up.
   var SIDE_C = [dir(-90, -10), dir(90, -10)], RULER_R = 48, STEP = 1.6;
-  function arcPt2(sd, r, phi) { var c = SIDE_C[sd < 0 ? 0 : 1]; return ring(c, r, sd < 0 ? phi : 180 - phi, sd < 0 ? phi : 180 - phi)[0]; }
+  // (one point of ring(): the two centres never change, so their frames are worked out once -- rebuilding one for each
+  // of ~900 ticks a frame was the HUD's biggest cost, profiled 2026-10-09)
+  var SIDE_B = SIDE_C.map(basis);
+  function arcPt2(sd, r, phi) {
+    var i = sd < 0 ? 0 : 1, c = SIDE_C[i], B = SIDE_B[i], a = (sd < 0 ? phi : 180 - phi) * D, cr = Math.cos(r * D), sr = Math.sin(r * D), ca = Math.cos(a), sa = Math.sin(a);
+    return norm([c[0] * cr + (B.R[0] * ca + B.U[0] * sa) * sr, c[1] * cr + (B.R[1] * ca + B.U[1] * sa) * sr, c[2] * cr + (B.R[2] * ca + B.U[2] * sa) * sr]);
+  }
   function rulers(p) {
     var base = p.pitch * STEP;
     tier(3);

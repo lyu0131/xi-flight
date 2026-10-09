@@ -19,7 +19,7 @@
    It also captures the monitor for the seat's light (see capture(), at the end): SITE5.env, SITE5.envFreeze,
    SITE5.envClouds; SITE5.loaded(k) is the loading readout's tick. */
 import * as THREE from 'three'
-import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, Effect } from 'postprocessing'
+import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, HueSaturationEffect, Effect } from 'postprocessing'
 import { AerialPerspectiveEffect, PrecomputedTexturesGenerator, getSunDirectionECEF, getMoonDirectionECEF, getECIToECEFRotationMatrix,
   SunDirectionalLight, SkyLightProbe, StarsGeometry, StarsMaterial, DEFAULT_STARS_DATA_URL } from '@takram/three-atmosphere'
 import { CloudsEffect, CLOUD_SHAPE_TEXTURE_SIZE, CLOUD_SHAPE_DETAIL_TEXTURE_SIZE } from '@takram/three-clouds'
@@ -32,7 +32,7 @@ const canvas = document.getElementById('world')
 const qp = new URLSearchParams(location.search)
 const START = new Date(qp.get('time') || '2026-10-08T17:10:00Z')   // dusk over Italy (the spec's start)
 const K = 1.62   // the camera's field, as a multiple of the screen's (tan): enough for the ball's spread with EYE0 at -0.2
-// the day's exposure (owner 2026-10-08: "get rid of the gloom"; 10 under AgX was a grey veil, 6 under Neutral reads clear)
+// the day's exposure (owner 2026-10-08: "get rid of the gloom"; 10 was a grey veil, 6 with the look below reads clear)
 const DAY_EXPO = 6
 const world = S.world = { ready: false, cloudsReady: false, light: 'sun', exposure: DAY_EXPO, loads: {}, srcTan: [1, 1] }
 // the loading readout: what's in so far
@@ -177,10 +177,12 @@ new STBNLoader().load(DEFAULT_STBN_URL, t => { setAll(APS.concat(CL), 'stbnTextu
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
 composer.addPass(new RenderPass(scene, camera))
 composer.addPass(new EffectPass(camera, ...(CLOUDS ? [clouds, ap] : [ap])))
-// (Khronos PBR Neutral, as the seat uses: AgX's default look greyed the whole Earth out)
-composer.addPass(new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL })))
+// the look: AgX, with its colour pushed back up (+0.3 saturation) at the day exposure of 6. (AgX alone at 10 greyed the
+// Earth out, 'gloom'; Khronos Neutral kept the colour but turned the haze and every dusk purple, owner 2026-10-09)
+const LOOK = () => [new ToneMappingEffect({ mode: ToneMappingMode.AGX }), new HueSaturationEffect({ hue: 0, saturation: 0.3 })]
+composer.addPass(new EffectPass(camera, ...LOOK()))
 composer.addPass(new EffectPass(camera, warp))
-// the capture's chain: the scene, the air and clouds, then (by hand, below) the same Neutral curve into capRT. Never the composer's own
+// the capture's chain: the scene, the air and clouds, then (by hand, below) the same look into capRT. Never the composer's own
 // setSize: it resizes the renderer, i.e. the world canvas. Its buffers and passes are sized to 64 once, here.
 const CS = 64
 let capComposer = null, capTone = null, capRT = null
@@ -191,7 +193,7 @@ if (CAPTURE) {
   capComposer.addPass(new EffectPass(capCam, ...(capClouds ? [capClouds, capAp] : [capAp])))
   capComposer.inputBuffer.setSize(CS, CS); capComposer.outputBuffer.setSize(CS, CS)
   for (const ps of capComposer.passes) ps.setSize(CS, CS)
-  capTone = new EffectPass(capCam, new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL }))
+  capTone = new EffectPass(capCam, ...LOOK())
   capTone.initialize(renderer, false, THREE.HalfFloatType); capTone.setSize(CS, CS)
   capRT = new THREE.WebGLRenderTarget(CS, CS, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace, depthBuffer: false })
 }
@@ -249,7 +251,7 @@ addEventListener('keydown', e => {
 if (timeBtn) timeBtn.addEventListener('click', () => setRate(RATES[(RATES.indexOf(world.time.rate) + 1) % RATES.length]))
 // the city lights and stars keep their apparent brightness whatever the exposure (CITY, STAR: at exposure 1)
 const CITY = 0.28, STAR = 1.4   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
-let expo = null, lastT = 0, meterGoal = 0
+let expo = null, lastT = 0, meterGoal = 0, tilesAt = 0, capAt = 0
 // the meter: the capture's mean display brightness is held near METER (dim, as a dusk should look) by opening the
 // exposure from the day's DAY_EXPO up to EXPO_MAX; brighter than that (day, sunset) it stays at DAY_EXPO
 const METER = 0.1, EXPO_MAX = 300
@@ -258,7 +260,7 @@ S.renderers.push(function (pose, Wd, Hd) {
   // and only past that, at 21 ms, does the picture's resolution step down
   if (pose.t > checkAt) {
     checkAt = pose.t + 2
-    if (earth3d && !earth3d.state.failed && !DETAIL) earth3d.setDetail(earth3d.state.errorTarget * (S.frameMs < 10 ? 1 / 1.25 : S.frameMs > 17 ? 1.25 : 1))
+    if (earth3d && !earth3d.state.failed && !DETAIL) earth3d.setDetail(earth3d.state.errorTarget * (S.frameMs < 7.5 ? 1 / 1.25 : S.frameMs > 17 ? 1.25 : 1))
     if (S.frameMs > 21 && scale > 0.6) scale = Math.max(0.6, scale - 0.15)
   }
   const w = Math.max(1, Math.round(Wd * scale)), h = Math.max(1, Math.round(Hd * scale))
@@ -304,10 +306,14 @@ S.renderers.push(function (pose, Wd, Hd) {
   U_.get('uTan').value.set(tx, ty); U_.get('uSrc').value.set(sx, sy)
   // (the tiles start streaming only once the atmosphere's tables are worked out: a thousand tiles arriving at once
   // starved that one-off GPU job, so the world never came ready and the monitor capture never started)
-  if (earth3d && atmo) earth3d.update()
+  // (the tile tree is walked at most 30 times a second: choosing detail doesn't need every frame, and the walk over
+  // ~1000 tiles was a fifth to a third of the main thread, profiled 2026-10-09)
+  if (earth3d && atmo && now - tilesAt > 1 / 30) { tilesAt = now; earth3d.update() }
   composer.render()
   if (atmo && !world.ready) world.ready = true
-  if (capComposer && atmo) capture(pose)
+  // (one capture face every 40 ms, the cube new about 4 times a second -- plenty for the seat's light. Every frame,
+  // its read-back stalled the main thread ~190 ms a second and drew the whole scene again, profiled 2026-10-09)
+  if (capComposer && atmo && (S.reduce || now - capAt > 0.04)) { capAt = now; capture(pose) }
 })
 
 // the monitor capture, for the seat's light (spec 2026-10-08-seat-light-design.md): the world as the monitor displays
