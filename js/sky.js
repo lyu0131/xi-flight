@@ -32,7 +32,9 @@ const canvas = document.getElementById('world')
 const qp = new URLSearchParams(location.search)
 const START = new Date(qp.get('time') || '2026-10-08T17:10:00Z')   // dusk over Italy (the spec's start)
 const K = 1.62   // the camera's field, as a multiple of the screen's (tan): enough for the ball's spread with EYE0 at -0.2
-const world = S.world = { ready: false, cloudsReady: false, light: 'sun', exposure: 10, loads: {}, srcTan: [1, 1] }
+// the day's exposure (owner 2026-10-08: "get rid of the gloom"; 10 under AgX was a grey veil, 6 under Neutral reads clear)
+const DAY_EXPO = 6
+const world = S.world = { ready: false, cloudsReady: false, light: 'sun', exposure: DAY_EXPO, loads: {}, srcTan: [1, 1] }
 // the loading readout: what's in so far
 const note = document.getElementById('loading')
 // the clouds are off for now (owner, 2026-10-08: "get rid of clouds, let me see the city"); ?clouds=1 brings them back
@@ -76,6 +78,9 @@ earthMat.onBeforeCompile = s => {
 // far tiles that sag below it near the horizon let it show there, which reads as the same dark ground)
 const EARTH_DROP = 150; world.earthDrop = EARTH_DROP
 const earth = new THREE.Mesh(earthGeo, earthMat); earth.scale.set(6378137 - EARTH_DROP, 6378137 - EARTH_DROP, 6356752.314245 - EARTH_DROP); scene.add(earth)
+// (and pushed back in depth: far from the coast Google's ocean tiles are coarse flat chords that sag below it, so it
+// showed through them as a darker sea with a jagged edge, flickering where the two met; the bias lets the tiles win)
+earthMat.polygonOffset = true; earthMat.polygonOffsetFactor = 2; earthMat.polygonOffsetUnits = 2000
 const tex = (url, srgb, k, use) => new THREE.TextureLoader().load(url, t => {
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); use(t); loaded(k)
 }, undefined, () => loaded(k, "THE EARTH'S MAPS COULDN'T LOAD"))
@@ -172,9 +177,10 @@ new STBNLoader().load(DEFAULT_STBN_URL, t => { setAll(APS.concat(CL), 'stbnTextu
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 })
 composer.addPass(new RenderPass(scene, camera))
 composer.addPass(new EffectPass(camera, ...(CLOUDS ? [clouds, ap] : [ap])))
-composer.addPass(new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.AGX })))
+// (Khronos PBR Neutral, as the seat uses: AgX's default look greyed the whole Earth out)
+composer.addPass(new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL })))
 composer.addPass(new EffectPass(camera, warp))
-// the capture's chain: the scene, the air and clouds, then (by hand, below) AgX into capRT. Never the composer's own
+// the capture's chain: the scene, the air and clouds, then (by hand, below) the same Neutral curve into capRT. Never the composer's own
 // setSize: it resizes the renderer, i.e. the world canvas. Its buffers and passes are sized to 64 once, here.
 const CS = 64
 let capComposer = null, capTone = null, capRT = null
@@ -185,7 +191,7 @@ if (CAPTURE) {
   capComposer.addPass(new EffectPass(capCam, ...(capClouds ? [capClouds, capAp] : [capAp])))
   capComposer.inputBuffer.setSize(CS, CS); capComposer.outputBuffer.setSize(CS, CS)
   for (const ps of capComposer.passes) ps.setSize(CS, CS)
-  capTone = new EffectPass(capCam, new ToneMappingEffect({ mode: ToneMappingMode.AGX }))
+  capTone = new EffectPass(capCam, new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL }))
   capTone.initialize(renderer, false, THREE.HalfFloatType); capTone.setSize(CS, CS)
   capRT = new THREE.WebGLRenderTarget(CS, CS, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace, depthBuffer: false })
 }
@@ -245,7 +251,7 @@ if (timeBtn) timeBtn.addEventListener('click', () => setRate(RATES[(RATES.indexO
 const CITY = 0.28, STAR = 1.4   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
 let expo = null, lastT = 0, meterGoal = 0
 // the meter: the capture's mean display brightness is held near METER (dim, as a dusk should look) by opening the
-// exposure from the day's 10 up to EXPO_MAX; brighter than that (day, sunset) it stays at 10, as before
+// exposure from the day's DAY_EXPO up to EXPO_MAX; brighter than that (day, sunset) it stays at DAY_EXPO
 const METER = 0.1, EXPO_MAX = 300
 S.renderers.push(function (pose, Wd, Hd) {
   // every 2 s: the 3D Earth's detail follows the frame time (finer while frames run under 10 ms, coarser over 17 ms),
@@ -267,7 +273,7 @@ S.renderers.push(function (pose, Wd, Hd) {
   // the light: the real sun (its twilight glow included) until twilight has ended (-10 deg); after that, if the moon
   // is up, the moon stands in for it everywhere at night exposure; with no moon the sun stays (a dark sky, the cities
   // and the stars). Under the sun the monitor meters its own picture like a camera (see capture()): never below the
-  // day's 10, opening up to EXPO_MAX as the twilight dims. The exposure eases over 3 s toward its goal.
+  // day's DAY_EXPO, opening up to EXPO_MAX as the twilight dims. The exposure eases over 3 s toward its goal.
   const now = performance.now() / 1000, r = world.time.rate
   // (paused, as under reduced motion, pose.t stands still and only a rate over x1 moves the clock)
   // (a frame's wall time is capped at 0.25 s, so a tab that was hidden doesn't jump the clock on its return)
@@ -278,7 +284,7 @@ S.renderers.push(function (pose, Wd, Hd) {
   const el = v => Math.asin(Math.max(-1, Math.min(1, v.dot(U)))) / D
   const byMoon = el(sun) < -10 && el(moon) > 2
   light.copy(byMoon ? moon : sun); world.light = byMoon ? 'moon' : 'sun'
-  const goal = byMoon ? 0.45 : meterGoal || 10
+  const goal = byMoon ? 0.45 : meterGoal || DAY_EXPO
   // (a metered goal always eases: it's measured off frames at the exposure before, so snapping to it would swing)
   // (wall-clock time: an eye adapts in real seconds, and the flight's clock stands still under reduced motion)
   expo = expo === null || (S.reduce && !(meterGoal && !byMoon)) ? goal : expo * Math.pow(goal / expo, Math.min(1, Math.max(0, now - lastT) / 3)); lastT = now
@@ -354,7 +360,7 @@ function capture(pose) {
           if (d[j] * up[0] + d[j + 1] * up[1] + d[j + 2] * up[2] < lim) { s += 0.2126 * f[i] + 0.7152 * f[i + 1] + 0.0722 * f[i + 2]; c++ }
         }
       })
-      if (c >= 0.02 * all) meterGoal = Math.min(EXPO_MAX, Math.max(10, world.exposure * Math.pow(METER / Math.max(s / c / 255, 1e-4), 2.2)))
+      if (c >= 0.02 * all) meterGoal = Math.min(EXPO_MAX, Math.max(DAY_EXPO, world.exposure * Math.pow(METER / Math.max(s / c / 255, 1e-4), 2.2)))
       if (!S.envFreeze) S.env = { n: capN, size: CS, faces: capFaces }
       capFaces = new Array(6); capGot = 0
     }
