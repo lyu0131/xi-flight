@@ -2,3 +2,4 @@ tools/tex-src/
 tools/earth-src/
 *.blend1
 __pycache__/
+tools/sky-src/

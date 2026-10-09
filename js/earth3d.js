@@ -200,7 +200,8 @@ export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
   const ION = [
     { src: 'https://assets.ion.cesium.com/ion-credit.png', alt: 'Cesium ion', href: 'https://cesium.com' },
     { text: 'Upgrade for commercial use.', href: 'https://cesium.com/pricing/' },
-    { src: 'https://assets.ion.cesium.com/google-credit.png', alt: 'Google' }]
+    { src: 'https://assets.ion.cesium.com/google-credit.png', alt: 'Google' },
+    { text: 'Milky Way: NASA/GSFC SVS · Stars: HYG (CC BY-SA)', href: 'https://svs.gsfc.nasa.gov/4851' }]   // (the night sky's sources: starsky.js)
   const credit = document.getElementById('attrib'); let creditAt = 0, creditKey = ''
   function updateCredit() {
     const now = performance.now(); if (!credit || now < creditAt) return

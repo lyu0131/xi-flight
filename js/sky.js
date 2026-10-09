@@ -11,7 +11,7 @@
      point's direction, read from the wide picture. The panel seams are the HUD's (hud.js), drawn as vectors.
    The light: the sun while it stands above -4 deg; below that the moon stands in for it (moonlight is sunlight,
    ~400 000 times dimmer), the exposure falls to night levels and the city lights (NASA's Black Marble, emissive
-   on the ground) and the stars (the Yale bright-star catalogue) are kept at their apparent brightness. Volumetric
+   on the ground) and the night sky (starsky.js: the HYG stars, NASA's Milky Way, the planets) are kept at their apparent brightness. Volumetric
    clouds (Takram), lit by the same light, cast their shadows and sit in the air.
    SITE5.world = { ready, cloudsReady, light, exposure, loads, camera, renderer, srcTan, tiles, heightAt, time: { rate,
    date }, cityGlowAt(lat, lon), nightGlow: { global, near }, nightTiles: { loaded, failed } } (tiles and heightAt: the 3D Earth, earth3d.js); SITE5.gl is its WebGL
@@ -20,12 +20,13 @@
    SITE5.envClouds; SITE5.loaded(k) is the loading readout's tick. */
 import * as THREE from 'three'
 import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, HueSaturationEffect, Effect } from 'postprocessing'
-import { AerialPerspectiveEffect, PrecomputedTexturesGenerator, getSunDirectionECEF, getMoonDirectionECEF, getECIToECEFRotationMatrix,
-  SunDirectionalLight, SkyLightProbe, StarsGeometry, StarsMaterial, SkyMaterial, DEFAULT_STARS_DATA_URL } from '@takram/three-atmosphere'
+import { AerialPerspectiveEffect, PrecomputedTexturesGenerator, getSunDirectionECEF, getMoonDirectionECEF,
+  SunDirectionalLight, SkyLightProbe, SkyMaterial } from '@takram/three-atmosphere'
 import { CloudsEffect, CLOUD_SHAPE_TEXTURE_SIZE, CLOUD_SHAPE_DETAIL_TEXTURE_SIZE } from '@takram/three-clouds'
-import { ArrayBufferLoader, DataTextureLoader, Ellipsoid, Geodetic, parseUint8Array, STBNLoader, DEFAULT_STBN_URL } from '@takram/three-geospatial'
+import { DataTextureLoader, Ellipsoid, Geodetic, parseUint8Array, STBNLoader, DEFAULT_STBN_URL } from '@takram/three-geospatial'
 import { makeEarth3D, night, NIGHT_GLSL, setNight } from './earth3d.js'
 import { makeNightLights } from './nightlights.js'
+import { makeStarSky } from './starsky.js'
 
 const S = window.SITE5, m = S.m, D = Math.PI / 180
 const canvas = document.getElementById('world')
@@ -108,17 +109,12 @@ if (earth3d && DETAIL) earth3d.setDetail(DETAIL)
 world.tiles = earth3d ? earth3d.state : { on: false, loaded: 0, failed: false }
 world.heightAt = earth3d ? earth3d.heightAt : () => null
 world.tileset = earth3d ? earth3d.tiles : null   // (the TilesRenderer itself, for the tests)
-// the sky, drawn as the scene's backdrop (a full-screen quad at infinity), and the stars over it: points at infinity,
-// turned with the Earth. (The air's effect used to paint the sky itself, over every background pixel. And the stars'
-// own 'background' mode puts each one exactly on the camera's far plane, where all of them were clipped: none ever
-// showed, owner 2026-10-09. So they're a sphere STARS_R round the camera instead: inside the far plane, behind the
-// Earth from any height up to the ceiling (the limb is under 3700 km away at 1000 km up), the air's haze over them.)
+// the sky, drawn as the scene's backdrop (a full-screen quad at infinity), and the night sky over it (starsky.js: on
+// spheres round the camera, behind the Earth). (The air's effect used to paint the sky itself, over every background
+// pixel, the stars included; and Takram's 'background' stars sat exactly on the far plane, all clipped: owner 2026-10-09.)
 const skyMat = new SkyMaterial(), skyQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), skyMat)
 skyQuad.frustumCulled = false; skyQuad.renderOrder = -1; scene.add(skyQuad)
-const starsMat = new StarsMaterial({ background: false }); starsMat.pointSize = 1.6
-const STARS_R = 5e6
-let stars = null
-new ArrayBufferLoader().load(DEFAULT_STARS_DATA_URL, data => { stars = new THREE.Points(new StarsGeometry(data), starsMat); stars.scale.setScalar(STARS_R); stars.frustumCulled = false; scene.add(stars); loaded('stars') }, undefined, () => loaded('stars'))
+const sky = makeStarSky({ scene, onLoad: () => loaded('stars') }); world.sky = sky.state
 
 // the ball warp, last in the chain
 const WARP = `
@@ -205,7 +201,7 @@ if (CAPTURE) {
   capRT = new THREE.WebGLRenderTarget(CS, CS, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace, depthBuffer: false })
 }
 const gen = new PrecomputedTexturesGenerator(renderer)
-for (const o of [skyMat, starsMat, ...APS, ...CL]) Object.assign(o, gen.textures)
+for (const o of [skyMat, ...APS, ...CL]) Object.assign(o, gen.textures)
 sunLight.transmittanceTexture = gen.textures.transmittanceTexture; skyLight.irradianceTexture = gen.textures.irradianceTexture
 let atmo = false
 gen.update().then(() => { atmo = true; loaded('atmosphere') }).catch(e => { console.error(e); atmo = true; loaded('atmosphere') })
@@ -225,7 +221,7 @@ S.warp = (x, y) => {
 let scale = 1.3 * Math.min(window.devicePixelRatio || 1, 1.5), checkAt = 0, bw = 0, bh = 0
 const P = new THREE.Vector3(), enu = new THREE.Matrix4(), E = new THREE.Vector3(), N = new THREE.Vector3(), U = new THREE.Vector3()
 const toECEF = l => new THREE.Vector3().addScaledVector(E, l[0]).addScaledVector(U, l[1]).addScaledVector(N, l[2])
-const sun = new THREE.Vector3(), moon = new THREE.Vector3(), light = new THREE.Vector3(), eci = new THREE.Matrix4()
+const sun = new THREE.Vector3(), moon = new THREE.Vector3(), light = new THREE.Vector3()
 // the city lights' darkness factor in JS, for the tests: the same gate as the shaders, at a point on the ground now
 world.cityGlowAt = (lat, lon) => {
   const a = lat * D, b = lon * D, el = Math.asin(Math.max(-1, Math.min(1, Math.cos(a) * Math.cos(b) * sun.x + Math.cos(a) * Math.sin(b) * sun.y + Math.sin(a) * sun.z))) / D
@@ -256,8 +252,8 @@ addEventListener('keydown', e => {
   e.preventDefault()
 })
 if (timeBtn) timeBtn.addEventListener('click', () => setRate(RATES[(RATES.indexOf(world.time.rate) + 1) % RATES.length]))
-// the city lights and stars keep their apparent brightness whatever the exposure (CITY, STAR: at exposure 1)
-const CITY = 0.28, STAR = 1.6   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
+// the city lights keep their apparent brightness whatever the exposure (CITY: at exposure 1; the stars, starsky.js)
+const CITY = 0.28   // (the 3 km city map reads as blotches if brighter; Phase 2's 500 m map sharpens it)
 let expo = null, lastT = 0, meterGoal = 0, tilesAt = 0, capAt = 0
 // the meter: the capture's mean display brightness is held near METER (dim, as a dusk should look) by opening the
 // exposure from the day's DAY_EXPO up to EXPO_MAX; brighter than that (day, sunset) it stays at DAY_EXPO
@@ -299,15 +295,15 @@ S.renderers.push(function (pose, Wd, Hd) {
   expo = expo === null || (S.reduce && !(meterGoal && !byMoon)) ? goal : expo * Math.pow(goal / expo, Math.min(1, Math.max(0, now - lastT) / 3)); lastT = now
   const exposure = world.exposure = expo
   renderer.toneMappingExposure = exposure
-  for (const o of [ap, clouds, sunLight, skyLight, starsMat, skyMat]) o.sunDirection.copy(light)
+  for (const o of [ap, clouds, sunLight, skyLight, skyMat]) o.sunDirection.copy(light)
   ap.moonDirection && ap.moonDirection.copy(moon); skyMat.moonDirection.copy(moon)
   sunLight.target.position.copy(P); sunLight.update(); skyLight.position.copy(P); skyLight.update()
-  earthMat.emissiveIntensity = CITY / exposure; starsMat.intensity = STAR * Math.min(1, exposure / 60) / exposure   // (at their apparent brightness from a night exposure of 60 up; in daylight, exposure 6, a tenth: a day exposure barely shows them)
+  earthMat.emissiveIntensity = CITY / exposure
   const glow = world.nightGlow = { global: smoothstep(40, 60, pose.alt), near: nightLights ? smoothstep(8, 15, pose.alt) : 0 }
   if (nightLights) nightLights.update(pose.geo[0], pose.geo[1])
   // (the real sun gates the city lights, even while the moon lights the scene; the same lights on the tiles)
   setNight(cityMap, CITY / exposure, sun, light, glow, nightLights)
-  if (stars) { getECIToECEFRotationMatrix(date, eci); stars.setRotationFromMatrix(eci); stars.position.copy(P) }
+  sky.update(date, P, exposure, pose.alt, U)
   const U_ = warp.uniforms
   U_.get('uEye').value.set(pose.eye[0], pose.eye[1], pose.eye[2]); U_.get('uEyeM').value.fromArray(mat(pose.eyeQ))
   U_.get('uTan').value.set(tx, ty); U_.get('uSrc').value.set(sx, sy)
@@ -354,7 +350,7 @@ function capture(pose) {
   capCam.updateMatrixWorld()
   if (capClouds) capClouds.sunDirection.copy(light)
   capAp.sunDirection.copy(light); capAp.moonDirection && capAp.moonDirection.copy(moon)
-  capComposer.render()
+  sky.showStars(false); capComposer.render(); sky.showStars(true)
   capTone.render(renderer, capComposer.outputBuffer, capRT, 0)
   const buf = new Uint8Array(CS * CS * 4)
   renderer.readRenderTargetPixelsAsync(capRT, 0, 0, CS, CS, buf).then(() => {

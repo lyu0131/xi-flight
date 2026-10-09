@@ -68,10 +68,14 @@ Takram's physical atmosphere and volumetric clouds, the library versions pinned 
 It runs over http only (`.claude/launch.json` `site5`, or the tests' own server) and needs the network.
 - **The Earth**: the WGS84 ellipsoid at real scale, NASA's land and sea colour and Black Marble city lights as emission (both in
   `assets/earth/`; if they can't load the readout says THE EARTH'S MAPS COULDN'T LOAD), lit through the air by the sun or the moon
-  (Takram's sun light and sky light probe). Stars from the Yale bright-star catalogue, turned with the Earth: points on a sphere 5000 km round the camera
-  (Takram's 'background' stars sit exactly on the far plane, where all of them were clipped), over a `SkyMaterial`
-  backdrop (the air's effect no longer paints the sky, which covered them too). At their apparent brightness from a
-  night exposure (60) up; in daylight (exposure 6) at a tenth, as a day exposure would barely show them.
+  (Takram's sun light and sky light probe). **The night sky** (`js/starsky.js`, spec `docs/2026-10-09-night-sky-design.md`): the HYG catalogue's 41 487
+  stars to magnitude 8 at their true colours, NASA's star-free Milky Way (SVS Deep Star Maps 2020) behind them, and Mercury,
+  Venus, Mars, Jupiter and Saturn where they are on the date (`astronomy-engine`, CDN). Baked by `tools/make_sky.py`
+  (Blender's Python) into `assets/sky/` (`stars.bin`, `milkyway.jpg`). Stars are Gaussian points, the brightest with a
+  halo; they twinkle and dim low over the horizon when the suit is down in the air. All on spheres round the camera; the
+  Earth hides them by a ray test on the ellipsoid (the flat Earth's depth offset put it level with them, so in the monitor
+  capture they shone through it and held the night meter at a day exposure). Kept out of the capture (a star's light is
+  set per pixel). Bright as seen at a night exposure (60) up, a tenth in daylight; credited on the credit line.
 - **The 3D Earth's quality** (owner 2026-10-09, "make rendering a lot better"): the tile cache holds 1.2 GB (0.9 kept on
   a trim; the library's 0.4 GB filled at ~1300 tiles and stopped any finer one loading), the detail tunes between 2 and
   24 px (finer under 7.5 ms a frame, coarser over 12), tile photos get 8x anisotropic filtering. Mipmaps stay off (the

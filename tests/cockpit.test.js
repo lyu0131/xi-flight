@@ -7,7 +7,7 @@ const serve = require('./serve');
 // opened from a local server rooted at the repo
 let srv = null;
 // ONLY=main,3d,... runs just those blocks (main, altitude, modes, traffic, controls, horizon, world, light, 3d,
-// capture, seatlight, reduce, phone, hud, time, pause, search); unset, everything runs
+// capture, seatlight, reduce, phone, hud, time, pause, search, stars); unset, everything runs
 const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null, want = n => !ONLY || ONLY.includes(n);
 async function launch(o) {
   const p = await launchFile(o);
@@ -770,6 +770,23 @@ async function ready(p) {
     const g0 = await pose(p, 'JSON.stringify(s.geo)'); await p.sleep(1000);
     check('P no longer pauses, and there is no pause button', (await pose(p, 'JSON.stringify(s.geo)')) !== g0 && !(await p.eval('document.getElementById("pause")')));
     check('pause: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    p.close();
+  }
+
+  // the night sky (spec 2026-10-09-night-sky-design.md; a light pass, by the owner's ask)
+  if (want('stars')) {
+    const p = await launch({ width: 1280, height: 720 });
+    await p.goto('../site5/index.html?seed=7&mode=free&time=2026-10-08T22:00:00Z', 300); await ready(p);
+    for (let i = 0; i < 40 && !(await p.eval('SITE5.world.sky.planets === 5')); i++) await p.sleep(250);
+    check('the catalogue (over 30 000 stars) and the five planets are up', await p.eval('SITE5.world.sky.stars > 30000 && SITE5.world.sky.planets === 5'), await p.eval('JSON.stringify(SITE5.world.sky)'));
+    const sirius = JSON.parse(await p.eval(`fetch('assets/sky/stars.bin').then(r => r.arrayBuffer()).then(b => { const n = new DataView(b).getUint32(0, true), o = 4 + Math.ceil(6 * n / 4) * 4, mg = new Uint8Array(b, o, n), ps = new Int16Array(b, 4, 3 * n);
+      let k = 0; for (let i = 1; i < n; i++) if (mg[i] < mg[k]) k = i; const x = ps[3 * k] / 32767, y = ps[3 * k + 1] / 32767, z = ps[3 * k + 2] / 32767;
+      return JSON.stringify({ mag: mg[k] / 20 - 2, ra: (Math.atan2(y, x) * 180 / Math.PI + 360) % 360, dec: Math.asin(z) * 180 / Math.PI }) })`));
+    check('the brightest star is Sirius, where it should be', Math.abs(sirius.mag + 1.45) < 0.1 && Math.abs(sirius.ra - 101.29) < 0.2 && Math.abs(sirius.dec + 16.72) < 0.2, JSON.stringify(sirius));
+    // (the stars once shone through the flat Earth in the monitor capture and held the night meter at a day exposure)
+    for (let i = 0; i < 60 && !(await p.eval('SITE5.world.exposure > 60')); i++) await p.sleep(250);
+    check('at night the monitor still opens up to a night exposure', (await p.eval('SITE5.world.exposure')) > 60, (await p.eval('SITE5.world.exposure')).toFixed(0));
+    check('stars: no JS errors', p.errors.length === 0, p.errors.join(' | '));
     p.close();
   }
 
