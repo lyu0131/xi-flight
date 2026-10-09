@@ -7,7 +7,7 @@ const serve = require('./serve');
 // opened from a local server rooted at the repo
 let srv = null;
 // ONLY=main,3d,... runs just those blocks (main, altitude, modes, traffic, controls, horizon, world, light, 3d,
-// capture, seatlight, reduce, phone, hud, time, pause, search, stars); unset, everything runs
+// capture, seatlight, reduce, phone, hud, time, pause, search, stars, tour); unset, everything runs
 const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null, want = n => !ONLY || ONLY.includes(n);
 async function launch(o) {
   const p = await launchFile(o);
@@ -317,8 +317,8 @@ async function ready(p) {
     const turnedF = Math.abs(((await pose(q, 's.heading')) - h0 + 540) % 360 - 180);
     check('FREE ignores the keys', auto && turnedF < 35, JSON.stringify({ auto, turnedF }));
     const seq = [await pose(q, 's.mode')];
-    for (let i = 0; i < 3; i++) { await press('m', 'KeyM', 77); seq.push(await pose(q, 's.mode')); }
-    check('M cycles FREE -> HYBRID -> INPUT -> FREE', seq.join() === 'FREE,HYBRID,INPUT,FREE', seq.join());
+    for (let i = 0; i < 4; i++) { await press('m', 'KeyM', 77); seq.push(await pose(q, 's.mode')); }
+    check('M cycles FREE -> HYBRID -> INPUT -> TOUR -> FREE', seq.join() === 'FREE,HYBRID,INPUT,TOUR,FREE', seq.join());
     await q.eval('document.getElementById("mode").click()'); await q.sleep(100);
     check('the mode button cycles and says so', (await pose(q, 's.mode')) === 'HYBRID' && /HYBRID/.test(await q.eval('document.getElementById("mode").getAttribute("aria-label")')),
       await q.eval('document.getElementById("mode").getAttribute("aria-label")'));
@@ -327,7 +327,7 @@ async function ready(p) {
     const wasManual = (await pose(q, 's.pilot')) === 'MANUAL';
     await press('m', 'KeyM', 77);
     const inInput = (await pose(q, 's.mode')) === 'INPUT' && (await pose(q, 's.pilot')) === 'MANUAL';
-    await press('m', 'KeyM', 77);
+    await press('m', 'KeyM', 77); await press('m', 'KeyM', 77);   // (INPUT -> TOUR -> FREE)
     const inFree = (await pose(q, 's.mode')) === 'FREE' && (await pose(q, 's.pilot')) === 'AUTO';
     await left(false);
     check('switching mode while a key is held', wasManual && inInput && inFree, JSON.stringify({ wasManual, inInput, inFree }));
@@ -770,6 +770,20 @@ async function ready(p) {
     const g0 = await pose(p, 'JSON.stringify(s.geo)'); await p.sleep(1000);
     check('P no longer pauses, and there is no pause button', (await pose(p, 'JSON.stringify(s.geo)')) !== g0 && !(await p.eval('document.getElementById("pause")')));
     check('pause: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    p.close();
+  }
+
+  // the scenic tour (owner, 2026-10-09; light, by the owner's ask): from just north of Lauterbrunnen it slows into the
+  // pass at 2000 km/h, flies it, and moves on to the next highlight
+  if (want('tour')) {
+    const p = await launch({ width: 1280, height: 720 });
+    await p.goto('../site5/index.html?seed=7&mode=tour&tour=6&lat=46.70&lon=7.88&alt=8&hdg=180&traffic=0&tiles=0', 300); await ready(p);
+    let inPass = null;
+    for (let i = 0; i < 60 && !inPass; i++) { await p.sleep(500); const t = JSON.parse(await p.eval('JSON.stringify({ phase: SITE5.pose.tour && SITE5.pose.tour.phase, v: SITE5.pose.speed })')); if (t.phase === 'pass' && Math.abs(t.v - 2000 / 3600) < 0.02) inPass = t; }
+    check('the tour slows to 2000 km/h through a pass', !!inPass, JSON.stringify(inPass));
+    for (let i = 0; i < 90 && (await p.eval('SITE5.pose.tour.i')) === 6; i++) await p.sleep(500);
+    check('then it moves on to the next highlight', (await p.eval('SITE5.pose.tour.i')) === 7 && /TOUR · NEXT: MATTERHORN/.test(await p.eval('document.getElementById("mode").textContent')), await p.eval('document.getElementById("mode").textContent'));
+    check('tour: no JS errors', p.errors.length === 0, p.errors.join(' | '));
     p.close();
   }
 

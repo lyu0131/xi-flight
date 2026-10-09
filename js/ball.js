@@ -88,9 +88,9 @@
   var lead = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } };   // the head looking into the move
   var gaze = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } }, gazeAt = [0, 0];   // the mouse, -1..1
   var keys = {}, lastKey = -1e9;
-  var MODES = ['FREE', 'HYBRID', 'INPUT'];
+  var MODES = ['FREE', 'HYBRID', 'INPUT', 'TOUR'];
   // HYBRID by default (owner: "mouse is not integrated" -- in FREE the mouse did nothing)
-  var mode = ((/[?&]mode=(free|hybrid|input)\b/.exec(location.search) || [])[1] || 'hybrid').toUpperCase();
+  var mode = ((/[?&]mode=(free|hybrid|input|tour)\b/.exec(location.search) || [])[1] || 'hybrid').toUpperCase();
   var modeBtn = document.getElementById('mode');
   // the teleport (search.js, Ctrl+K): the suit is put over (lat, lon) at altKm (5 km if not given), the floor worked out
   // afresh there; heading, speed and mode carry on
@@ -100,13 +100,14 @@
   };
   S.setMode = function (name) {
     mode = MODES.indexOf(name) < 0 ? 'FREE' : name; lastKey = -1e9;   // a switch takes effect at once, nothing carried over
+    if (mode === 'TOUR' && typeof tour !== 'undefined') tour.from = null;   // (the tour picks up from where the suit is)
     showMode();
   };
   function showMode() {
     if (modeBtn) { modeBtn.textContent = 'MODE: ' + mode + ' · ' + WHAT[mode]; modeBtn.setAttribute('aria-label', 'Flight mode: ' + mode + ', ' + WHAT[mode].toLowerCase() + '. Press M to change.'); }
   }
   // what each mode does, said on the button (owner: "I don't know how any of the modes work")
-  var WHAT = { FREE: 'AUTOPILOT FLIES, YOU WATCH', HYBRID: 'AUTOPILOT FLIES, MOUSE OR KEYS TAKE OVER', INPUT: 'YOU FLY: MOUSE, W/S THROTTLE' }, nudgeT = 0;
+  var WHAT = { FREE: 'AUTOPILOT FLIES, YOU WATCH', HYBRID: 'AUTOPILOT FLIES, MOUSE OR KEYS TAKE OVER', INPUT: 'YOU FLY: MOUSE, W/S THROTTLE', TOUR: 'SCENIC FLIGHT OVER EUROPE' }, nudgeT = 0;
   S.setMode(mode);
   function nextMode() { S.setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]); }
   if (modeBtn) modeBtn.addEventListener('click', nextMode);
@@ -149,6 +150,69 @@
     if (e.pointerType === 'mouse') { gazeAt = [e.clientX / innerWidth * 2 - 1, e.clientY / innerHeight * 2 - 1]; mouse = gazeAt; }
   });
 
+  // ---- the scenic tour (TOUR mode; the route is S.TOUR, tour-data.js) ----
+  // A loop of highlights, each a pass flown low and slow along its path (waypoints along the valley, river or fjord). Between them it cruises TOUR_ALT up at
+  // TOUR_V; nearing a pass it comes down and slows in step with the distance left (TOUR_K km/s per km, so ~300 km out it
+  // starts to ease off), into the pass at PASS_V, 2000 km/h (owner, 2026-10-09), `agl` over the ground; out of it it
+  // climbs and speeds up the same way. The world clock is kept on daytime: if the next pass would be reached outside
+  // 9-16 h local, it moves to 10:30 there. Steering takes over as in HYBRID; let go and the tour carries on.
+  // ?tour=<n> starts at highlight n.
+  var TOUR_V = 10, TOUR_ALT = 40, TOUR_K = 0.03, PASS_V = 2000 / 3600;
+  var tour = { i: Math.max(0, qs('tour', 0)) | 0, j: 0, low: 0, phase: 'leg', name: '', dist: 0, from: null }, tourShown = 0;
+  function gc(la1, lo1, la2, lo2) {   // great-circle distance (km) and initial bearing (deg, 0 north, clockwise)
+    var p1 = la1 * D, p2 = la2 * D, dl = (lo2 - lo1) * D;
+    var d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((p2 - p1) / 2), 2) + Math.cos(p1) * Math.cos(p2) * Math.pow(Math.sin(dl / 2), 2)));
+    return { km: d * RE, brg: Math.atan2(Math.sin(dl) * Math.cos(p2), Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl)) / D };
+  }
+  function daylight(h) {   // keep the clock on daytime at the next pass (once a leg, once the world's clock is up)
+    var w = S.world, t = w && w.time;
+    if (!t || !t.setLocal || !t.date || tour.day === tour.i) return;
+    tour.day = tour.i;
+    var lon_ = h.path[h.path.length - 1][1], local = ((t.date.getUTCHours() + t.date.getUTCMinutes() / 60 + lon_ / 15) % 24 + 24) % 24;
+    if (local < 9 || local > 16) t.setLocal(10.5, lon_);
+  }
+  function tourGoal(now) {
+    var R = S.TOUR; if (!R || !R.length) return null;
+    var h = R[tour.i % R.length], P = h.path, exag = (S.world && S.world.exag) || 3;
+    if (tour.from === null) { tour.from = [lat, lon]; tour.day = -1; tour.phase = 'leg'; }
+    daylight(h);
+    // (into the pass only once down near its height: from orbit it spirals down over its start first)
+    if (tour.phase === 'leg' && gc(lat, lon, P[0][0], P[0][1]).km < 3 && pos[1] < (tour.low || 0) + 2) { tour.phase = 'pass'; tour.j = 1; }
+    if (tour.phase === 'pass') {
+      // along the path: on to the next waypoint once within 1.5 km of this one, or once past it (the one after is nearer
+      // than the two are apart)
+      while (tour.j < P.length) {
+        var w = P[tour.j], nx = P[tour.j + 1], dw = gc(lat, lon, w[0], w[1]).km;
+        if (dw < 1.5 || (nx && gc(lat, lon, nx[0], nx[1]).km < gc(w[0], w[1], nx[0], nx[1]).km)) tour.j++; else break;
+      }
+      if (tour.j >= P.length) {   // through it: on to the next highlight
+        tour.from = P[P.length - 1].slice(); tour.i = (tour.i + 1) % R.length; tour.phase = 'leg';
+        h = R[tour.i]; P = h.path; daylight(h);
+      }
+    }
+    // a leg aims at a gate on the pass's own line, back from its start by what a 30 deg glide down to it needs: so it
+    // lines up with the valley and arrives low; as the height goes the gate slides in to the start
+    var pass = tour.phase === 'pass', tgt = P[tour.j];
+    if (!pass) {
+      var G = Math.max(2, (pos[1] - (tour.low || 0)) * 1.7), ux = (P[1][1] - P[0][1]) * Math.cos(P[0][0] * D), uy = P[1][0] - P[0][0], ul = Math.hypot(ux, uy) || 1;
+      tgt = [P[0][0] - uy / ul * G / KM_DEG, P[0][1] - ux / ul * G / (KM_DEG * Math.cos(P[0][0] * D))];
+    }
+    var to = gc(lat, lon, tgt[0], tgt[1]);
+    var d = pass ? 0 : Math.min(to.km, gc(lat, lon, tour.from[0], tour.from[1]).km);
+    // the ground: what's under the suit once it's low and the tiles are in (floor), else the valley's floor x the relief
+    var ground = pos[1] < 30 && floor > ALT_LO ? floor - 0.3 : h.floor * exag, low = ground + h.agl;
+    // (high above the pass, the height left counts as distance too: from orbit it dives fast and slows only near the ground)
+    if (!pass) d = Math.max(d, (pos[1] - low) * 1.5);
+    var left = to.km; if (pass) for (var k = tour.j; k < P.length - 1; k++) left += gc(P[k][0], P[k][1], P[k + 1][0], P[k + 1][1]).km;
+    tour.name = h.name; tour.dist = left; tour.low = low;
+    if (now - tourShown > 250 && modeBtn) {
+      tourShown = now;
+      var say = 'MODE: TOUR · ' + (pass ? h.name + ' · ' + Math.round(left) + ' KM' : 'NEXT: ' + h.name + ' · ' + Math.round(to.km) + ' KM');
+      if (modeBtn.textContent !== say) modeBtn.textContent = say;
+    }
+    return { v: clamp(TOUR_K * d, PASS_V, TOUR_V), alt: Math.min(TOUR_ALT, low + 0.13 * d), brg: to.brg };
+  }
+
   // ---- one step of the simulation ----
   function step(dt, now) {
     // the mouse as a stick: its offset from the centre, past the dead zone
@@ -156,14 +220,15 @@
     var ms = mouse && mode !== 'FREE' && !S.typing ? [dz(mouse[0]), -dz(mouse[1])] : [0, 0];
     if (ms[0] || ms[1]) lastKey = now;
     var held_ = keys.l || keys.r || keys.u || keys.d || keys.ql || keys.qr || ms[0] || ms[1];
-    var manual = mode === 'INPUT' || (mode === 'HYBRID' && (now - lastKey < 4000 || held_));
+    var manual = mode === 'INPUT' || ((mode === 'HYBRID' || mode === 'TOUR') && (now - lastKey < 4000 || held_));
+    var tg = mode === 'TOUR' && !manual && !reduce ? tourGoal(now) : null;   // (the scenic tour's speed, height and bearing)
     if (manual) ap.alt = null;   // the autopilot picks up the height it's handed
     // the throttle: W/S move it (0.8 a second) and it stays, in every mode (from a standstill even the autopilot needs
     // it); Shift boosts
     var boosting = !!keys.b;
     throttle = clamp(throttle + ((keys.tu ? 1 : 0) - (keys.td ? 1 : 0)) * 0.5 * dt, 0, 1);
     var chasing = !manual && ap.id !== null, cruise = spd(throttle) + (boosting ? Math.min(BOOST, Math.max(2, spd(throttle) * 1.5)) : 0);   // (the autopilot has an aircraft: it slows for the chase, then runs back up)
-    if (!reduce) speed += ((chasing ? Math.min(cruise, Math.max(CHASE_SPD, (ap.range - 8) * 0.4)) : cruise) - speed) * Math.min(1, dt * 1.2);
+    if (!reduce) speed += ((tg ? tg.v : chasing ? Math.min(cruise, Math.max(CHASE_SPD, (ap.range - 8) * 0.4)) : cruise) - speed) * Math.min(1, dt * 1.2);
     if (!reduce) T += dt;
     // the traffic round the suit, as seen from it (still under reduced motion)
     tr = tr || (S.makeTraffic && S.makeTraffic(SEED, { near: qs('near', 0) > 0 }));
@@ -191,6 +256,10 @@
       if (mode === 'INPUT' && !climb && !reduce) wp = clamp(-pitch.x * 2, -20, 20);
       yaw.v += (wy - yaw.v) * rate(turn); pitch.v += (wp - pitch.v) * rate(climb);
       yaw.x += yaw.v * dt; pitch.x += pitch.v * dt;
+    } else if (tg) {
+      // the tour: the nose eases round to the bearing, the climb or dive sized to reach the height in ~8 s
+      spring(yaw, yaw.x + wrap(tg.brg - yaw.x), 1.2, 0.9, dt);
+      spring(pitch, clamp(Math.atan2(tg.alt - pos[1], Math.max(speed * 8, 0.5)) / D, pos[1] - tg.alt > 20 ? -60 : -30, 30), 1.6, 0.9, dt);   // (steeper while far above)
     } else if (!reduce) {
       // AUTO cruises to the traffic: it picks the nearest aircraft within 60 deg of the nose it hasn't done in the
       // last 20s and closes on it with a lag, so it drifts into the sight, until it has held a lock on it for 4s;
@@ -272,7 +341,7 @@
       suitQ: suitQ, contacts: contacts, eye: eye, eyeQ: qmul(seatQ, euler(view.yaw, view.pitch, 0)),
       heading: ((yaw.x % 360) + 360) % 360, pitch: pitch.x, flash: flash, pos: pos.slice(), alt: pos[1], speed: speed, geo: [lat, lon], throttle: throttle, boost: boosting,
       locked: locked, lockT: lockT, lockId: lockId, pilot: manual ? 'MANUAL' : 'AUTO', chasing: chasing, mode: mode,
-      modeWord: mode === 'HYBRID' ? (manual ? 'MANUAL' : 'HYBRID') : mode, head: view, t: T,
+      modeWord: mode === 'HYBRID' ? (manual ? 'MANUAL' : 'HYBRID') : mode, head: view, t: T, tour: mode === 'TOUR' ? tour : null,
       stick: [clamp(yaw.v / 55, -1, 1), clamp(pitch.v / 40, -1, 1)]   // the grips' deflection: turn (+ right), climb (+ up)
     };
   }

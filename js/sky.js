@@ -111,6 +111,7 @@ const earth3d = TOKEN && qp.get('tiles') !== '0'
 if (earth3d && DETAIL) earth3d.setDetail(DETAIL)
 world.tiles = earth3d ? earth3d.state : { on: false, loaded: 0, failed: false }
 world.heightAt = earth3d ? earth3d.heightAt : () => null
+world.exag = earth3d ? earth3d.exag : 1   // (the relief's stretch: the tour sizes its valleys by it)
 world.tileset = earth3d ? earth3d.tiles : null   // (the TilesRenderer itself, for the tests)
 // the sky, drawn as the scene's backdrop (a full-screen quad at infinity), and the night sky over it (starsky.js: on
 // spheres round the camera, behind the Earth). (The air's effect used to paint the sky itself, over every background
@@ -252,6 +253,11 @@ function showTime() {   // HH:MM local mean solar time (UTC + lon / 15 h) and th
   timeBtn.setAttribute('aria-label', 'World time ' + hm + ' local, ' + (r ? 'running ' + r + ' times' : 'paused') + '. ] faster, [ slower, \\ back to now.')
 }
 const setRate = r => { world.time.rate = r; showTime() }
+// the scenic tour keeps to daytime (ball.js): the clock moved on to `hour` local mean solar time at longitude `lon`
+world.time.setLocal = (hour, lon) => {
+  const d = world.time.date, cur = d.getUTCHours() + d.getUTCMinutes() / 60 + lon / 15
+  offset += ((((hour - cur) % 24) + 24) % 24) * 3600000
+}
 addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey || (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]'))) return
   const i = RATES.indexOf(world.time.rate)

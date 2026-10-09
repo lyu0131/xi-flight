@@ -55,6 +55,15 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
 - **Targeting**: the aircraft nearest the boresight, once within 4.5 deg (inside the
   sight), is held 0.5s to lock; the target is kept until it passes 7 deg or another sits 2.5 deg nearer, so the
   lock doesn't flicker. `pose.lockId` names it.
+- **TOUR** (the fourth mode, M; owner 2026-10-09): a scenic loop of Europe's mountains, rivers and valleys
+  (`js/tour-data.js`: the Amalfi coast, the Iron Gates, the High Tatras, the Wachau, Lake Bled, the Dolomites,
+  Lauterbrunnen, the Matterhorn, Mont Blanc, the Verdon, Ordesa, Glen Coe, the Geirangerfjord, the Rhine Gorge). Each
+  pass is a path of waypoints through the towns along it, snapped to the lowest ground within ~1 km by a survey of the
+  3D Earth, flown at **2000 km/h** `agl` over the ground. Between passes it cruises 40 km up at 10 km/s, slowing and
+  descending with the distance left (0.03 km/s per km) and climbing out the same way; a leg aims at a gate on the pass's
+  line, back by what a 30 deg glide needs, so it lines up with the valley (from orbit it swings out and glides in). The
+  clock is moved to 10:30 local if a pass would be reached outside 9-16 h. Steering takes over as in HYBRID. The mode
+  button reads `TOUR · NEXT: <PASS> · <KM>` / `TOUR · <PASS> · <KM LEFT>`; `pose.tour`; `?tour=<n>` starts at pass n.
 - **No pause**: added 2026-10-08 (`P`, `#pause`), taken out again by the owner 2026-10-09.
 - **Go to (Ctrl+K / Cmd+K)** (`js/search.js`, owner 2026-10-09): a `<dialog>` in the HUD's voice. A place name is looked up
   with OpenStreetMap's Nominatim on Enter only (its usage policy: no search-as-you-type; credited in the box), up to 5

@@ -232,7 +232,7 @@ export function makeEarth3D({ scene, camera, renderer, token, onFail }) {
   const ray = new THREE.Raycaster(), hits = [], top = new THREE.Vector3()
   ray.firstHitOnly = true
   return {
-    state, tiles,
+    state, tiles, exag: EXAG,
     update() { if (!state.failed) { tiles.update(); updateCredit() } },
     resize() { if (!state.failed) tiles.setResolutionFromRenderer(camera, renderer) },
     // the detail, kept within DETAIL_MIN..DETAIL_MAX (a lower error target loads finer tiles)
