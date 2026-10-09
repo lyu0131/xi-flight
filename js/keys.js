@@ -3,6 +3,6 @@
    before the site goes public, restrict it under ion.cesium.com -> Access Tokens -> Allowed URLs to your domain.
    This file is git-ignored, so the token never lands in the repo. */
 window.SITE5_KEYS = {
-  cesiumIon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IkxqQTdkcFd0UFZ1akNhamciLCJqdGkiOiJhOWZkZmU4NC05OGUwLTRlMzctODIzNi1mNTQ0Y2UwMDRjYmEiLCJpZCI6NTE3ODY3LCJzdWIiOiJ0aGlydHlvbmVpc2dvbmUiLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoic2l0ZTUiLCJpYXQiOjE3OTE0ODU5NDR9.xAdL1kAZT3iqluPenxoXC-VMRBwp9GEeuvcdFoEGB3E',
+  cesiumIon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6Ilp1dnZsYng4Z1pQX203UWYiLCJqdGkiOiJhOWZkZmU4NC05OGUwLTRlMzctODIzNi1mNTQ0Y2UwMDRjYmEiLCJpZCI6NTE3ODY3LCJzdWIiOiJ0aGlydHlvbmVpc2dvbmUiLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoic2l0ZTUiLCJpYXQiOjE3OTE1MDY1NTR9.n5a-phChAgU6SCMKvS4d6E85PekuVSJwFwufYvWcAIs',
   earthAtNightAssetId: 3812   // "Earth at Night" (NASA Black Marble) in My Assets
 };
