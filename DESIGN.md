@@ -47,11 +47,15 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   the word reads MANUAL) and it hands back 4s after the last key, with the aim assist; **INPUT** is yours -- the keys
   only, no assist, and let go it holds heading and altitude (the pitch eases level). A switch takes effect at once.
   `pose.pilot` says who's flying (AUTO or MANUAL); the right ring's toggle follows it.
-- **Head**: no looking round by dragging (taken out by the owner, 2026-10-09), and the cursor is hidden over the view
-  (`cursor: none` on `#cockpit`; the dock's buttons show it). The head **leads every move** (0.3 x the turn rate, up to 24°; 0.42 x the climb rate, up to 20°) on a slightly bouncy spring,
-  and the **mouse steers the gaze** (up to 9° across, 6° up and down). The HUD is painted on the ball, so this is what
-  moves it on screen: climb and the whole HUD drops, as in the FPV clip when the pilot looks up. Off under reduced
-  motion. `SITE5.project(ballPoint)` gives a ball point's screen position (tests use it).
+- **Mouse-look** (owner, 2026-10-13, replacing the mouse stick, which kept turning: the hidden cursor's offset from the
+  centre set the turn rate and there was no centre to find): click the view to capture the mouse (pointer lock; a
+  crosshair cursor until then), and a move turns the nose by `LOOK_DEG` 0.12° a pixel, taken up over ~60 ms; stopping
+  holds it. Esc lets go. Mouse moves take over in HYBRID and TOUR like the keys, fire control keeps off the nose while
+  the mouse moves, and INPUT doesn't level a nose the mouse pointed. `SITE5.mouseLook(dx, dy)` (the tests call it).
+- **Head**: no looking round by dragging (taken out 2026-10-09). The head **leads every move** a little (0.15 x the turn
+  rate, up to 12°; 0.21 x the climb rate, up to 10°) on a firm spring (damping 0.85; it was twice that and bouncier,
+  with the gaze following the cursor, until 2026-10-13: floaty). The HUD is painted on the ball, so this is what moves
+  it on screen. Off under reduced motion. `SITE5.project(ballPoint)` gives a ball point's screen position.
 - **Targeting**: the aircraft nearest the boresight, once within 4.5 deg (inside the
   sight), is held 0.5s to lock; the target is kept until it passes 7 deg or another sits 2.5 deg nearer, so the
   lock doesn't flicker. `pose.lockId` names it.

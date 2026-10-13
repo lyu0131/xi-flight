@@ -5,16 +5,17 @@
    The suit flies in km over the Earth, among air traffic (traffic.js): on its own (AUTO) it cruises from one
    aircraft to the next, closing on each until it has held a lock a while. Arrows/WASD take it (MANUAL) and it
    hands back 4s after the last key.
-   Controls, arcade style (owner, 2026-10-07): the mouse steers (its offset from the centre of the screen sets the
-   turn and climb, past a small dead zone; the cursor is hidden over the view), W/S set the throttle (it stays; 0 is a
+   Controls, arcade style (owner, 2026-10-07): the mouse looks, as in a flight game (owner, 2026-10-13: the old stick,
+   the hidden cursor's offset from the centre, kept turning and you couldn't find the centre): click the view to take
+   the mouse (pointer lock), moving it turns the nose by as much and stopping it holds the nose, Esc lets go;
+   W/S set the throttle (it stays; 0 is a
    standstill, and the flight starts there), Shift boosts while held, A/D bank into a turn, Q/E yaw gently, the arrows
    are a stick too. No looking round by dragging and no pause (owner, 2026-10-09).
    Three modes (M, or the MODE button): FREE watches (AUTO only, the keys don't fly), HYBRID shares (as above),
    INPUT is yours (the keys only; let go and it holds heading and altitude).
    The HUD is painted on the ball, so it only moves on screen when the eye moves against the ball. The
-   pilot's head therefore leads every move -- looks up into a climb, into a turn -- on a spring that lags
-   a beat and overshoots (as in the FPV clip, where the whole HUD drops as the pilot looks up), and the
-   mouse steers the gaze a few degrees.
+   pilot's head therefore leads every move a little -- looks up into a climb, into a turn -- on a firm spring
+   (as in the FPV clip, where the HUD drops as the pilot looks up; softer and bouncier until 2026-10-13: floaty).
    sky.js, hud.js and seat.js register in SITE5.renderers and draw from the pose. The only global is SITE5. */
 (function () {
   'use strict';
@@ -81,12 +82,13 @@
   // 1: 40). W/S move it 0.5 a second. The boost scales with it: +1.5x the speed, at least +2 km/s and at most +BOOST.
   var CHASE_SPD = 0.5, SPD_HI = 40, BOOST = 20, throttle = clamp(qs('throttle', matchMedia('(hover: none)').matches ? 0.5 : 0), 0, 1);
   var spd = function (t) { return SPD_HI * t * t * t; }, speed = spd(throttle);
-  var mouse = null, DEAD = 0.08;   // the cursor (-1..1 from the centre, or null if not over the page)
+  // mouse-look: LOOK_DEG of nose per pixel moved; the moves are taken up over ~60 ms (LOOK_EASE a second), so it's fluid
+  // but never late. look = the turn still to apply, lookRate = its rate (for the bank and the head), lookAt = the last move
+  var LOOK_DEG = 0.12, LOOK_EASE = 16, look = { yaw: 0, pitch: 0 }, lookRate = { yaw: 0, pitch: 0 }, lookAt = -1e9, pitchByMouse = false;
   var yaw = { x: qs('hdg', 258), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
   var seat = [{ x: 0, v: 0 }, { x: 0, v: 0 }, { x: 0, v: 0 }];   // offset in the ball, in ball radii
   var seatRoll = { x: 0, v: 0 }, seatPitch = { x: 0, v: 0 };
   var lead = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } };   // the head looking into the move
-  var gaze = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } }, gazeAt = [0, 0];   // the mouse, -1..1
   var keys = {}, lastKey = -1e9;
   var MODES = ['FREE', 'HYBRID', 'INPUT', 'TOUR'];
   // HYBRID by default (owner: "mouse is not integrated" -- in FREE the mouse did nothing)
@@ -145,10 +147,18 @@
   });
   addEventListener('keyup', function (e) { var r = keyRole(e); if (r) keys[r] = false; });
   addEventListener('blur', function () { keys = {}; });
-  cockpit.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse') mouse = null; });
-  cockpit.addEventListener('pointermove', function (e) {
-    if (e.pointerType === 'mouse') { gazeAt = [e.clientX / innerWidth * 2 - 1, e.clientY / innerHeight * 2 - 1]; mouse = gazeAt; }
+  // a mouse move, in px: turns the nose (not in FREE, nor while typing in the go-to box). The tests call it directly.
+  S.mouseLook = function (dx, dy) {
+    if (mode === 'FREE' || S.typing) return;
+    look.yaw += dx * LOOK_DEG; look.pitch -= dy * LOOK_DEG; if (dy) pitchByMouse = true;
+    lookAt = lastKey = performance.now();
+  };
+  // a click on the view takes the mouse (the browser hides it and reports moves, not positions); Esc gives it back
+  cockpit.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'mouse' || (e.target.closest && e.target.closest('a, button, dialog')) || document.pointerLockElement === cockpit) return;
+    var r = cockpit.requestPointerLock && cockpit.requestPointerLock(); if (r && r.catch) r.catch(function () {});
   });
+  document.addEventListener('mousemove', function (e) { if (document.pointerLockElement === cockpit) S.mouseLook(e.movementX || 0, e.movementY || 0); });
 
   // ---- the scenic tour (TOUR mode; the route is S.TOUR, tour-data.js) ----
   // A loop of highlights, each a pass flown low and slow along its path (waypoints along the valley, river or fjord). Between them it cruises TOUR_ALT up at
@@ -215,11 +225,8 @@
 
   // ---- one step of the simulation ----
   function step(dt, now) {
-    // the mouse as a stick: its offset from the centre, past the dead zone
-    var dz = function (v) { return Math.sign(v) * Math.max(0, Math.abs(v) - DEAD) / (1 - DEAD); };
-    var ms = mouse && mode !== 'FREE' && !S.typing ? [dz(mouse[0]), -dz(mouse[1])] : [0, 0];
-    if (ms[0] || ms[1]) lastKey = now;
-    var held_ = keys.l || keys.r || keys.u || keys.d || keys.ql || keys.qr || ms[0] || ms[1];
+    var mouseOn = now - lookAt < 600;   // (the mouse moved just now: it's flying, fire control keeps off the nose)
+    var held_ = keys.l || keys.r || keys.u || keys.d || keys.ql || keys.qr || mouseOn;
     var manual = mode === 'INPUT' || ((mode === 'HYBRID' || mode === 'TOUR') && (now - lastKey < 4000 || held_));
     var tg = mode === 'TOUR' && !manual && !reduce ? tourGoal(now) : null;   // (the scenic tour's speed, height and bearing)
     if (manual) ap.alt = null;   // the autopilot picks up the height it's handed
@@ -239,23 +246,29 @@
       c.off = Math.acos(clamp(dot(c.d, fwd0), -1, 1)) / D;
       c.near = c.span / c.range > NEAR;   // big enough to see: drawn as its model, no longer only a W mark
     });
-    var turn = clamp((keys.r ? 1 : 0) - (keys.l ? 1 : 0) + ((keys.qr ? 1 : 0) - (keys.ql ? 1 : 0)) * 0.35 + ms[0], -1, 1);
-    var climb = clamp((keys.u ? 1 : 0) - (keys.d ? 1 : 0) + ms[1], -1, 1);
+    var turn = clamp((keys.r ? 1 : 0) - (keys.l ? 1 : 0) + ((keys.qr ? 1 : 0) - (keys.ql ? 1 : 0)) * 0.35, -1, 1);
+    var climb = (keys.u ? 1 : 0) - (keys.d ? 1 : 0);
+    if (climb) pitchByMouse = false;
+    // the mouse's turn, taken up over ~60 ms; dropped while the autopilot flies
+    var lk = manual && !reduce ? Math.min(1, dt * LOOK_EASE) : 1, ly = manual && !reduce ? look.yaw * lk : 0, lp = manual && !reduce ? look.pitch * lk : 0;
+    look.yaw -= look.yaw * lk; look.pitch -= look.pitch * lk;
+    lookRate.yaw += ((dt ? ly / dt : 0) - lookRate.yaw) * Math.min(1, dt * 10); lookRate.pitch += ((dt ? lp / dt : 0) - lookRate.pitch) * Math.min(1, dt * 10);
     if (manual) {
       // Fire control helps the pilot onto a target, as AUTO's chase does: once every key is let go with a contact
       // within ASSIST of the nose, the nose eases onto it and tracks it (the one being locked, if it's in reach, so
       // it doesn't hop round a bunched group). While any key is held the keys alone fly, at full rate. (Without
       // this the keys' 55 deg/s and their coast overshot the 4.5 deg lock window every time; slowing the keys
       // near contacts instead made every turn a crawl when the contacts were bunched, owner 2026-10-05.)
-      var held = turn || climb, cur = contacts.filter(function (c) { return c.id === lockId && c.off < ASSIST; })[0];
+      var held = turn || climb || mouseOn, cur = contacts.filter(function (c) { return c.id === lockId && c.off < ASSIST; })[0];
       var aim = cur || contacts.reduce(function (a, b) { return !a || b.off < a.off ? b : a; }, null), assist = mode === 'HYBRID' && !held && !!aim && aim.off < ASSIST;
       var wy = assist ? clamp(wrap(aim.az - yaw.x) * 4, -30, 30) : turn * 80, wp = assist ? clamp((aim.el - pitch.x) * 4, -30, 30) : climb * 60;
       // a key ramps the turn up smoothly; letting go brakes it hard, so a tap stops about where it's let go
       var rate = function (k) { return Math.min(1, dt * (assist ? 8 : k ? 4 : 12)); };
-      // INPUT holds course when let go: the pitch eases back to level, so the altitude holds too
-      if (mode === 'INPUT' && !climb && !reduce) wp = clamp(-pitch.x * 2, -20, 20);
+      // INPUT holds course when the climb keys are let go: the pitch eases back to level, so the altitude holds too.
+      // (Not where the mouse put the nose: that stays where it's pointed.)
+      if (mode === 'INPUT' && !climb && !pitchByMouse && !reduce) wp = clamp(-pitch.x * 2, -20, 20);
       yaw.v += (wy - yaw.v) * rate(turn); pitch.v += (wp - pitch.v) * rate(climb);
-      yaw.x += yaw.v * dt; pitch.x += pitch.v * dt;
+      yaw.x += yaw.v * dt + ly; pitch.x += pitch.v * dt + lp;
     } else if (tg) {
       // the tour: the nose eases round to the bearing, the climb or dive sized to reach the height in ~8 s
       spring(yaw, yaw.x + wrap(tg.brg - yaw.x), 1.2, 0.9, dt);
@@ -281,7 +294,7 @@
       else { yaw.v += (6 * Math.sin(T * 0.05) - yaw.v) * Math.min(1, dt); spring(pitch, hold, 1.2, 0.9, dt); yaw.x += yaw.v * dt; }
     }
     yaw.v = clamp(yaw.v, -110, 110); pitch.v = clamp(pitch.v, -80, 80); pitch.x = clamp(pitch.x, -75, 75);
-    spring(bank, reduce ? 0 : clamp(yaw.v * 0.5, -60, 60), 3.2, 0.7, dt);
+    spring(bank, reduce ? 0 : clamp((yaw.v + lookRate.yaw) * 0.5, -60, 60), 4, 0.85, dt);
     suitQ = euler(yaw.x, pitch.x, bank.x);
     // the floor: 0.3 km over the 3D Earth's terrain where it's loaded, never under ALT_LO: the highest of the ground
     // here, 0.5 s and 1 s ahead along the flight path, sampled every 0.2 s (at 3x relief the slopes are 3x steeper, and a
@@ -313,14 +326,15 @@
       spring(seat[0], ax, 5.5, 0.38, dt); spring(seat[1], ay, 5.5, 0.38, dt); spring(seat[2], 0, 5.5, 0.45, dt);
       spring(seatRoll, -bank.v * 0.05 * FLOAT, 6, 0.4, dt); spring(seatPitch, -pitch.v * 0.03 * FLOAT, 6, 0.4, dt);
     }
-    // it leads the move (a third of the turn rate, a little under half the climb rate), and follows the mouse
+    // it leads the move a little (0.15 of the turn rate, 0.21 of the climb rate), on a firm spring that barely overshoots
+    // (until 2026-10-13: twice the swing, damping 0.5, and a gaze that followed the cursor -- floaty, owner)
     if (!reduce) {
-      spring(lead.yaw, clamp(yaw.v * 0.3, -24, 24) * FLOAT, 4.2, 0.5, dt); spring(lead.pitch, clamp(pitch.v * 0.42, -20, 20) * FLOAT, 4.2, 0.5, dt);
-      spring(gaze.yaw, gazeAt[0] * 9, 3, 0.8, dt); spring(gaze.pitch, -gazeAt[1] * 6, 3, 0.8, dt);
+      spring(lead.yaw, clamp((yaw.v + lookRate.yaw) * 0.15, -12, 12) * FLOAT, 5, 0.85, dt);
+      spring(lead.pitch, clamp((pitch.v + lookRate.pitch) * 0.21, -10, 10) * FLOAT, 5, 0.85, dt);
     }
     // the pilot's resting gaze is the nose itself: the triangle sight is right in front of the eyes
     var ht = S.headTest || [0, 0];   // (a fixed head turn [yaw, pitch], for the tests only: there's no looking round)
-    var view = { yaw: ht[0] + lead.yaw.x + gaze.yaw.x, pitch: ht[1] + lead.pitch.x + gaze.pitch.x };
+    var view = { yaw: ht[0] + lead.yaw.x, pitch: ht[1] + lead.pitch.x };
 
     // Targeting: the contact nearest the boresight, once inside LOCK_IN, is held for LOCK_TIME to lock. The
     // current target is kept until it drifts past LOCK_OUT (or another sits clearly nearer), so the lock never

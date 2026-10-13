@@ -112,7 +112,8 @@ async function ready(p) {
   check('climbing pulls both arms back', !!tiltClimb && tiltClimb.every(t => t.pitch < -5), JSON.stringify(tiltClimb));
   const y1 = await noseY();
   await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 });
-  check('climbing shifts the HUD down the screen', y1 - y0 > 40, `${y0.toFixed(0)} -> ${y1.toFixed(0)}`);
+  check('climbing shifts the HUD down the screen', y1 - y0 > 15,   // (the head leads half as far since 2026-10-13: less floaty)
+    `${y0.toFixed(0)} -> ${y1.toFixed(0)}`);
   await p.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
   await p.sleep(400); let downY = 0;
   for (let i = 0; i < 10; i++) { downY = Math.max(downY, (await cl()).chev.downY); await p.sleep(30); }
@@ -121,14 +122,11 @@ async function ready(p) {
   await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
   check('diving pushes the down arrow down', downY > 0.3, downY.toFixed(2));
   await p.sleep(4600);
-  // the mouse steers the gaze a little: the HUD slides away from where you look
-  await p.mouse('mouseMoved', 720, 450); await p.sleep(900);
-  const g0 = await p.eval('SITE5.project([0, 0, 1])[0]');
-  await p.mouse('mouseMoved', 1400, 450); await p.sleep(1200);
-  const g1 = await p.eval('SITE5.project([0, 0, 1])[0]');
-  check('looking right with the mouse slides the HUD left', g0 - g1 > 25, `${g0.toFixed(0)} -> ${g1.toFixed(0)}`);
-  // the mouse steers now (HYBRID): back to the centre, and the autopilot takes over again
-  await p.mouse('mouseMoved', 720, 450); await p.sleep(4600);
+  // mouse-look (HYBRID): a sweep right turns the nose right (the lock checks below need the sky it leaves in view:
+  // ~85 deg right, as the old mouse stick's turn did); then the autopilot takes over again
+  const g0 = await pose(p, 's.heading'); await p.eval('SITE5.mouseLook(700, 0)'); await p.sleep(600);
+  check('a mouse sweep turns the nose', (((await pose(p, 's.heading')) - g0 + 540) % 360) - 180 > 60, String(await pose(p, 's.heading')));
+  await p.sleep(4600);
   // the layout is measured off the owner's front frame: the anchors sit where that frame has them (checked
   // still, in the reduced-motion run below); here, live: the rail, its caps, the rulers stream, three contacts
   const parts = () => p.eval('JSON.stringify(SITE5.parts)').then(JSON.parse);
@@ -154,6 +152,9 @@ async function ready(p) {
   // the triangle sight is always up, and the coffin cells glow in turn (a lit run that moves on)
   // the sight: faint at idle, closing in (and jittering) while a lock builds, full and blinking on lock
   // (E: springs open and closes in, clunks into the lock; brackets and V follow the target; pings while held)
+  // (from a fresh page: these checks need the autopilot to find and hold a lock, and where the steps above leave the
+  // suit decides whether it can in time -- 2026-10-13, the mouse-look change moved it out of reach)
+  await p.goto(PAGE, 300); await ready(p); await p.sleep(1500);
   // the dial eases round after a click: read it once it has settled
   let dial0 = (await ctl()).dial; for (let i = 0; i < 20; i++) { await p.sleep(60); const d = (await ctl()).dial; if (Math.abs(d - dial0) < 0.5) break; dial0 = d; }
   let thumbIn = 0, triggerIn = 0, combat = 0;
@@ -218,8 +219,10 @@ async function ready(p) {
   }
   // targeting: a lock goes to the contact nearest the boresight, and the HUD marks that one
   let tg = null;
-  for (let i = 0; i < 80 && !tg; i++) { await p.sleep(100); tg = await p.eval(`(() => { const s = SITE5.pose; if (!s.locked) return null;
+  // (a lock within W_RANGE: further out the HUD carries no mark for it, by design)
+  for (let i = 0; i < 200 && !tg; i++) { await p.sleep(100); tg = await p.eval(`(() => { const s = SITE5.pose; if (!s.locked) return null;
     const near = s.contacts.reduce((a, b) => b.off < a.off ? b : a), cur = s.contacts.find(c => c.id === s.lockId);
+    if (!cur || cur.range > SITE5.W_RANGE) return null;
     return JSON.stringify({ lockId: s.lockId, near: near.id, nearOff: near.off, off: cur.off, marked: SITE5.parts.target }); })()`); }
   tg = tg && JSON.parse(tg);
   // (a held lock stays put until another contact is clearly nearer, by 2.5 deg: ball.js keeps it from flickering)
@@ -244,7 +247,7 @@ async function ready(p) {
   await p.mouse('mousePressed', 700, 450, 1); for (let k = 1; k <= 8; k++) await p.mouse('mouseMoved', 700 - 75 * k, 450, 1); await p.mouse('mouseReleased', 100, 450);
   await p.mouse('mouseMoved', 720, 450); await p.sleep(1500);
   check('a drag no longer turns the head', Math.abs(await pose(p, 's.head.yaw')) < 12, String(await pose(p, 's.head.yaw')));
-  check('the cursor is hidden over the view', (await p.eval('getComputedStyle(document.getElementById("cockpit")).cursor')) === 'none');
+  check('the view shows a crosshair cursor until it takes the mouse', /crosshair/.test(await p.eval('getComputedStyle(document.getElementById("cockpit")).cursor')));
   // the controls are there at rest, low in the view (the seat drawn smaller, owner 2026-10-09)
   await p.goto(PAGE, 300); await ready(p); await p.sleep(300);
   check('the controls show at rest', await p.eval('SITE5.parts.seat.grip > 4'), JSON.stringify(await p.eval('SITE5.parts.seat')));
@@ -372,19 +375,17 @@ async function ready(p) {
     check('the HUD shows the speed', /KM\/H/.test(await k.eval('SITE5.parts.speedText || ""')), await k.eval('SITE5.parts.speedText || ""'));
     check('the left ring\'s throttle follows it', Math.abs((await k.eval('SITE5.parts.controlsL.twist')) - (await pose(k, 's.throttle'))) < 0.15,
       JSON.stringify([await k.eval('SITE5.parts.controlsL.twist'), await pose(k, 's.throttle')]));
-    // the mouse at the centre doesn't steer; at the right it turns right
-    await k.mouse('mouseMoved', 600, 350); await k.sleep(600);
-    let h0 = await pose(k, 's.heading'); await k.sleep(1000);
+    // mouse-look (owner, 2026-10-13): a move turns the nose by as much (300 px at 0.12 deg/px: 36 deg), within a beat;
+    // once the mouse stops the nose holds -- no drift, no hunting for a centre
+    let h0 = await pose(k, 's.heading'); await k.eval('SITE5.mouseLook(300, 0)'); await k.sleep(300);
+    const right = await turned(h0); h0 = await pose(k, 's.heading'); await k.sleep(1500);
     const still = Math.abs(await turned(h0));
-    await k.mouse('mouseMoved', 1120, 350); await k.sleep(200); h0 = await pose(k, 's.heading'); await k.sleep(1500);
-    const right = await turned(h0);
-    await k.mouse('mouseMoved', 600, 350); await k.sleep(800);
-    check('the mouse steers: centre holds, right turns right', still < 2 && right > 20, JSON.stringify({ still, right }));
+    check('the mouse looks: a move turns the nose by as much, then it holds', right > 30 && right < 42 && still < 2, JSON.stringify({ right, still }));
     h0 = await pose(k, 's.heading'); await hold('d', 'KeyD', 68, 1000); const dTurn = await turned(h0);
     await k.sleep(600); h0 = await pose(k, 's.heading'); await hold('e', 'KeyE', 69, 1000); const eTurn = await turned(h0);
     check('D banks into a right turn, E yaws right more gently', dTurn > 30 && eTurn > 8 && eTurn < dTurn, JSON.stringify({ dTurn, eTurn }));
     await k.goto('../site5/index.html?seed=7&mode=free&alt=18', 300); await ready(k); await k.sleep(500);
-    await k.mouse('mouseMoved', 1150, 350); let auto = true;
+    await k.eval('SITE5.mouseLook(400, 0)'); let auto = true;
     for (let i = 0; i < 8; i++) { await k.sleep(100); if ((await pose(k, 's.pilot')) !== 'AUTO') auto = false; }
     const thr0 = await pose(k, 's.throttle'); await hold('w', 'KeyW', 87, 600);
     check('FREE: the mouse does nothing, W still sets the throttle', auto && (await pose(k, 's.throttle')) > thr0, JSON.stringify({ auto, thr0 }));
@@ -401,7 +402,7 @@ async function ready(p) {
     // looking down at the ground from the floor (owner, 2026-10-13: the nose wouldn't budge): the floor limits the height, not
     // where the nose points
     await k.goto('../site5/index.html?seed=7&mode=input&alt=1&traffic=0&tiles=0', 300); await ready(k); await k.sleep(500);
-    await k.mouse('mouseMoved', 600, 680); await k.sleep(2000); const downAtFloor = await pose(k, 's.pitch'); await k.mouse('mouseMoved', 600, 350);
+    await k.eval('SITE5.mouseLook(0, 500)'); await k.sleep(1500); const downAtFloor = await pose(k, 's.pitch');
     check('at the floor the mouse still points the nose down', downAtFloor < -30 && (await pose(k, 's.alt')) >= 1, String(Math.round(downAtFloor)));
     {   // 5x faster (owner, 2026-10-08): full throttle is 40 km/s
       const p = k;
