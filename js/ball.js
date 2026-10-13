@@ -296,13 +296,14 @@
       });
       floor = g === null ? ALT_LO : Math.max(ALT_LO, g / 1000 + 0.3);
     }
-    // flying forward, in km: the flight path is the nose; at the floor or the ceiling the climb is taken out
+    // flying forward, in km: the flight path is the nose; at the floor or the ceiling the height is held (below), and the
+    // suit slides along it. (The nose stays free: this used to level the nose at either limit, so at the floor looking
+    // down at the ground the camera wouldn't budge, owner 2026-10-13.)
     if (!reduce) {
       var f = dir(yaw.x, pitch.x);
       pos[0] += f[0] * speed * dt; pos[1] += f[1] * speed * dt; pos[2] += f[2] * speed * dt;
       lat = clamp(lat + f[2] * speed * dt / KM_DEG, -89.9, 89.9);
       lon += f[0] * speed * dt / (KM_DEG * Math.cos(lat * D)); lon = ((lon + 540) % 360) - 180;
-      if ((pos[1] >= ALT_HI && pitch.x > 0) || (pos[1] <= floor && pitch.x < 0)) { pitch.x *= Math.max(0, 1 - dt * 6); pitch.v = Math.min(0, pitch.v * Math.sign(pitch.x || 1)) * Math.sign(pitch.x || 1); }
     }
     pos[1] = clamp(pos[1], floor, ALT_HI);   // (still under reduced motion: a start inside a mountain is lifted out)
 

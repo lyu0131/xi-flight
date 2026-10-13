@@ -254,9 +254,13 @@ function showTime() {   // HH:MM local mean solar time (UTC + lon / 15 h) and th
 }
 const setRate = r => { world.time.rate = r; showTime() }
 // the scenic tour keeps to daytime (ball.js): the clock moved on to `hour` local mean solar time at longitude `lon`
+// (a jump, not a drift: the eye starts afresh in the new light. Switching to TOUR at dusk used to leave the exposure at the
+// dusk's 50 or more, and its metered goal with it, so the noon picture washed white for ~6 s while both eased down to the
+// day's 6: owner, "Tour makes the map glitch", 2026-10-12)
 world.time.setLocal = (hour, lon) => {
   const d = world.time.date, cur = d.getUTCHours() + d.getUTCMinutes() / 60 + lon / 15
   offset += ((((hour - cur) % 24) + 24) % 24) * 3600000
+  expo = null; meterGoal = 0
 }
 addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey || (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]'))) return

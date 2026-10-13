@@ -143,7 +143,7 @@ It runs over http only (`.claude/launch.json` `site5`, or the tests' own server)
 - **The world clock** (owner, 2026-10-08): the world's date is `START + pose.t + offset`, and each frame the offset
   runs at (rate - 1) x the wall-clock frame time (capped 0.25 s), so it works under reduced motion too (where pose.t
   stands still, and x0 and x1 both hold the clock). Rates x0 (paused), x1, x60, x600, x3600: `]` faster, `[` slower
-  (each stops at the end), `\` back to x1 and now (keys ignored while typing in a field). `#time` (bottom left,
+  (each stops at the end), `\` back to x1 and now (keys ignored while typing in a field). The tour's daytime jump (`world.time.setLocal`) also resets the exposure and its metered goal, so the new light is shown at its own exposure at once instead of easing down from the dusk's (owner, "Tour makes the map glitch", 2026-10-12). `#time` (bottom left,
   stacked on MODE, its voice) reads `HH:MM LOCAL · ×RATE` (`⏸` paused), local being mean solar time (UTC + lon/15 h);
   a tap steps the rate on, x3600 wrapping to x0. `SITE5.world.time` = { rate, date }. The hint says `[ ] TIME`. The volumetric clouds are off for now
   (owner, 2026-10-08); `?clouds=1` brings them back. The start: 40.92 N 14.95 E (east of Naples), 400 km, heading 258

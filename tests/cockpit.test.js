@@ -398,6 +398,11 @@ async function ready(p) {
     // going slowly (owner, 2026-10-09: the throttle is cubic): a short tap from a stop is a crawl, tens of m/s
     await hold('w', 'KeyW', 87, 200); await k.sleep(3000); const crawl = await pose(k, 's.speed');
     check('a tap of W from a stop is a crawl (10-200 m/s)', crawl > 0.01 && crawl < 0.2, (crawl * 1000).toFixed(0) + ' m/s');
+    // looking down at the ground from the floor (owner, 2026-10-13: the nose wouldn't budge): the floor limits the height, not
+    // where the nose points
+    await k.goto('../site5/index.html?seed=7&mode=input&alt=1&traffic=0&tiles=0', 300); await ready(k); await k.sleep(500);
+    await k.mouse('mouseMoved', 600, 680); await k.sleep(2000); const downAtFloor = await pose(k, 's.pitch'); await k.mouse('mouseMoved', 600, 350);
+    check('at the floor the mouse still points the nose down', downAtFloor < -30 && (await pose(k, 's.alt')) >= 1, String(Math.round(downAtFloor)));
     {   // 5x faster (owner, 2026-10-08): full throttle is 40 km/s
       const p = k;
       await p.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(p); await p.sleep(5000);
@@ -784,6 +789,14 @@ async function ready(p) {
     for (let i = 0; i < 90 && (await p.eval('SITE5.pose.tour.i')) === 6; i++) await p.sleep(500);
     check('then it moves on to the next highlight', (await p.eval('SITE5.pose.tour.i')) === 7 && /TOUR · NEXT: MATTERHORN/.test(await p.eval('document.getElementById("mode").textContent')), await p.eval('document.getElementById("mode").textContent'));
     check('tour: no JS errors', p.errors.length === 0, p.errors.join(' | '));
+    // the tour moves the clock to daytime; the eye mustn't carry the dusk's exposure over (the picture washed white for
+    // seconds while it eased back down, owner: "Tour makes the map glitch")
+    await p.goto('../site5/index.html?seed=7&mode=hybrid&throttle=0&alt=60&traffic=0&tiles=0&time=2026-10-08T18:30:00Z', 300); await ready(p);
+    for (let i = 0; i < 120 && !((await p.eval('SITE5.world.exposure')) > 20); i++) await p.sleep(250);
+    const dusk = await p.eval('SITE5.world.exposure');
+    await p.eval('SITE5.setMode("TOUR")'); await p.sleep(500);
+    const after = await p.eval('SITE5.world.exposure');
+    check('switching to TOUR (a clock jump from dusk to day) puts the exposure at the day level at once', dusk > 20 && after < 8, 'dusk ' + dusk + ' -> ' + after);
     p.close();
   }
 
