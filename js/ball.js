@@ -125,7 +125,7 @@
   var EYE0 = [0, 0, -0.2];
   // how much the camera floats: the seat's sway and jolts, its roll and pitch, and the head leading the move all
   // scale by this (owner: 75% of what it was, 2026-10-05)
-  var FLOAT = 0.75;
+  var FLOAT = 0.5;   // (0.75 until 2026-10-13: the HUD too wobbly, owner)
   var suitQ = euler(0, 3, 0);
 
   // ---- input ----
@@ -252,7 +252,9 @@
     // the mouse's turn, taken up over ~60 ms; dropped while the autopilot flies
     var lk = manual && !reduce ? Math.min(1, dt * LOOK_EASE) : 1, ly = manual && !reduce ? look.yaw * lk : 0, lp = manual && !reduce ? look.pitch * lk : 0;
     look.yaw -= look.yaw * lk; look.pitch -= look.pitch * lk;
-    lookRate.yaw += ((dt ? ly / dt : 0) - lookRate.yaw) * Math.min(1, dt * 10); lookRate.pitch += ((dt ? lp / dt : 0) - lookRate.pitch) * Math.min(1, dt * 10);
+    // (its rate smoothed over ~0.3 s: a mouse reports in uneven bursts, and the bank (and the seat's roll with it) took each
+    // one as a jolt -- the HUD swam with every move, owner 2026-10-13)
+    lookRate.yaw += ((dt ? ly / dt : 0) - lookRate.yaw) * Math.min(1, dt * 3); lookRate.pitch += ((dt ? lp / dt : 0) - lookRate.pitch) * Math.min(1, dt * 3);
     if (manual) {
       // Fire control helps the pilot onto a target, as AUTO's chase does: once every key is let go with a contact
       // within ASSIST of the nose, the nose eases onto it and tracks it (the one being locked, if it's in reach, so
@@ -323,14 +325,15 @@
     // the seat, hung in the ball: thrown outward in a turn, pressed down in a pull, lagging the roll
     if (!reduce) {
       var ax = -yaw.v * D * 0.075 * FLOAT, ay = -pitch.v * D * 0.06 * FLOAT;
-      spring(seat[0], ax, 5.5, 0.38, dt); spring(seat[1], ay, 5.5, 0.38, dt); spring(seat[2], 0, 5.5, 0.45, dt);
-      spring(seatRoll, -bank.v * 0.05 * FLOAT, 6, 0.4, dt); spring(seatPitch, -pitch.v * 0.03 * FLOAT, 6, 0.4, dt);
+      spring(seat[0], ax, 5.5, 0.8, dt); spring(seat[1], ay, 5.5, 0.8, dt); spring(seat[2], 0, 5.5, 0.8, dt);   // (damping 0.8: it settles; 0.38-0.45 rang, the HUD wobbling with it, owner 2026-10-13)
+      spring(seatRoll, -bank.v * 0.05 * FLOAT, 6, 0.8, dt); spring(seatPitch, -pitch.v * 0.03 * FLOAT, 6, 0.8, dt);
     }
-    // it leads the move a little (0.15 of the turn rate, 0.21 of the climb rate), on a firm spring that barely overshoots
-    // (until 2026-10-13: twice the swing, damping 0.5, and a gaze that followed the cursor -- floaty, owner)
+    // it leads a key's move a little (0.15 of the turn rate, 0.21 of the climb rate), on a firm spring that barely overshoots
+    // (until 2026-10-13: twice the swing, damping 0.5, and a gaze that followed the cursor -- floaty, owner). Not the
+    // mouse's: the mouse is the pilot's own aim, and the HUD swinging with each move of it was the wobble (owner).
     if (!reduce) {
-      spring(lead.yaw, clamp((yaw.v + lookRate.yaw) * 0.15, -12, 12) * FLOAT, 5, 0.85, dt);
-      spring(lead.pitch, clamp((pitch.v + lookRate.pitch) * 0.21, -10, 10) * FLOAT, 5, 0.85, dt);
+      spring(lead.yaw, clamp(yaw.v * 0.15, -12, 12) * FLOAT, 5, 0.85, dt);
+      spring(lead.pitch, clamp(pitch.v * 0.21, -10, 10) * FLOAT, 5, 0.85, dt);
     }
     // the pilot's resting gaze is the nose itself: the triangle sight is right in front of the eyes
     var ht = S.headTest || [0, 0];   // (a fixed head turn [yaw, pitch], for the tests only: there's no looking round)

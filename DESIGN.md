@@ -15,7 +15,8 @@ the clips, and why, is in `docs/reference.md`.
 world -> **suit** (attitude quaternion) -> **ball** (unit sphere, rigid with the suit) -> **seat** (spring-hung in the
 ball: thrown outward in a turn, pressed down in a pull, lagging the roll) -> **eye** (seat + head
 look; it sits at `EYE0`, a little above and behind the centre). Frames: x right, y up, z forward; degrees.
-  `FLOAT` (0.75, owner 2026-10-05) scales how much the camera floats: the seat's sway and jolts, its roll and
+  `FLOAT` (0.5 since 2026-10-13, was 0.75: the HUD too wobbly; its springs damped 0.8, were ~0.4 and rang; the mouse's
+  aim no longer swings the head or jolts the bank) scales how much the camera floats: the seat's sway and jolts, its roll and
   pitch, and the head leading the move.
 - The ball is a **display**: a point p on it shows the world in direction p from the centre. Seen from the eye, which is
   never at the centre, everything on it bends, and the bend moves as the seat sways. That is the only source of
