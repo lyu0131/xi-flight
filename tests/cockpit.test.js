@@ -409,6 +409,20 @@ async function ready(p) {
       await p.goto('../site5/index.html?seed=7&mode=input&throttle=1', 300); await ready(p); await p.sleep(5000);
       check('5x: full throttle is about 40 km/s', Math.abs((await pose(p, 's.speed')) - 40) < 2, String(await pose(p, 's.speed')));
     }
+    {   // tilting with the mouse is smooth even at a laptop's ~40 fps (owner, 2026-10-15: "shaky as hell"): a hand on a 125 Hz
+        // mouse, the CPU slowed 6x; the view's turn rate frame to frame changes gently (roughness: mean |rate change| /
+        // mean |rate|; 0.39 when each frame took a share of the reports that had landed in it, 0.16 now)
+      await k.goto('../site5/index.html?seed=7&mode=input&alt=11&throttle=0.4&traffic=0&tiles=0', 300); await ready(k); await k.sleep(800);
+      await k.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+      const r = JSON.parse(await k.eval(`new Promise(res => { const t0 = performance.now(), fr = [];
+        const iv = setInterval(() => { const t = (performance.now() - t0) / 1000; SITE5.mouseLook(Math.cos(t * 5.2) * 6, Math.sin(t * 5.2) * 5); }, 8);
+        const f = ts => { fr.push([ts, SITE5.pose.pitch]); if (ts - t0 < 3000) requestAnimationFrame(f); else { clearInterval(iv); res(JSON.stringify(fr)); } };
+        requestAnimationFrame(f); })`));
+      await k.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      const rate = r.slice(1).map((v, i) => (v[1] - r[i][1]) / Math.max(0.5, v[0] - r[i][0]));
+      let a = 0, b = 0; for (let i = 1; i < rate.length; i++) { a += Math.abs(rate[i] - rate[i - 1]); b += Math.abs(rate[i]); }
+      check('tilting with the mouse is smooth at ~40 fps', a / b < 0.2, (a / b).toFixed(3) + ' roughness over ' + r.length + ' frames');
+    }
     check('controls: no JS errors', k.errors.length === 0, k.errors.join(' | '));
     k.close();
   }

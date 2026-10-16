@@ -84,7 +84,7 @@
   var spd = function (t) { return SPD_HI * t * t * t; }, speed = spd(throttle);
   // mouse-look: LOOK_DEG of nose per pixel moved; the moves are taken up over ~60 ms (LOOK_EASE a second), so it's fluid
   // but never late. look = the turn still to apply, lookRate = its rate (for the bank and the head), lookAt = the last move
-  var LOOK_DEG = 0.12, LOOK_EASE = 16, look = { yaw: 0, pitch: 0 }, lookRate = { yaw: 0, pitch: 0 }, lookAt = -1e9, pitchByMouse = false;
+  var LOOK_DEG = 0.12, LOOK_EASE = 16, LOOK_TAU = 45, lookVel = { yaw: 0, pitch: 0 }, lookT = -1e9, look = { yaw: 0, pitch: 0 }, lookRate = { yaw: 0, pitch: 0 }, lookAt = -1e9, pitchByMouse = false;
   var yaw = { x: qs('hdg', 258), v: 0 }, pitch = { x: 3, v: 0 }, bank = { x: 0, v: 0 };   // ?hdg= the start heading
   var seat = [{ x: 0, v: 0 }, { x: 0, v: 0 }, { x: 0, v: 0 }];   // offset in the ball, in ball radii
   var seatRoll = { x: 0, v: 0 }, seatPitch = { x: 0, v: 0 };
@@ -148,8 +148,17 @@
   addEventListener('keyup', function (e) { var r = keyRole(e); if (r) keys[r] = false; });
   addEventListener('blur', function () { keys = {}; });
   // a mouse move, in px: turns the nose (not in FREE, nor while typing in the go-to box). The tests call it directly.
-  S.mouseLook = function (dx, dy) {
+  // Each move also updates the mouse's speed (deg/ms), from the reports' own timestamps and smoothed over LOOK_TAU ms:
+  // a frame turns the nose by that speed x its own time. (Turning by a share of what had piled up made each frame's
+  // turn depend on how many reports -- one, two or three, every 8 ms -- happened to land in it: at a laptop's 40 fps
+  // the view shook as it tilted, owner 2026-10-15.) `t` is the move's time (ms, performance.now's clock).
+  S.mouseLook = function (dx, dy, t) {
     if (mode === 'FREE' || S.typing) return;
+    t = t || performance.now();
+    var gap = clamp(t - lookT, 1, 50), a = 1 - Math.exp(-gap / LOOK_TAU);
+    if (t - lookT > 50) lookVel.yaw = lookVel.pitch = 0;   // (from rest)
+    lookVel.yaw += (dx * LOOK_DEG / gap - lookVel.yaw) * a; lookVel.pitch += (-dy * LOOK_DEG / gap - lookVel.pitch) * a;
+    lookT = t;
     look.yaw += dx * LOOK_DEG; look.pitch -= dy * LOOK_DEG; if (dy) pitchByMouse = true;
     lookAt = lastKey = performance.now();
   };
@@ -158,7 +167,7 @@
     if (e.pointerType !== 'mouse' || (e.target.closest && e.target.closest('a, button, dialog')) || document.pointerLockElement === cockpit) return;
     var r = cockpit.requestPointerLock && cockpit.requestPointerLock(); if (r && r.catch) r.catch(function () {});
   });
-  document.addEventListener('mousemove', function (e) { if (document.pointerLockElement === cockpit) S.mouseLook(e.movementX || 0, e.movementY || 0); });
+  document.addEventListener('mousemove', function (e) { if (document.pointerLockElement === cockpit) S.mouseLook(e.movementX || 0, e.movementY || 0, e.timeStamp); });
 
   // ---- the scenic tour (TOUR mode; the route is S.TOUR, tour-data.js) ----
   // A loop of highlights, each a pass flown low and slow along its path (waypoints along the valley, river or fjord). Between them it cruises TOUR_ALT up at
@@ -250,8 +259,13 @@
     var climb = (keys.u ? 1 : 0) - (keys.d ? 1 : 0);
     if (climb) pitchByMouse = false;
     // the mouse's turn, taken up over ~60 ms; dropped while the autopilot flies
-    var lk = manual && !reduce ? Math.min(1, dt * LOOK_EASE) : 1, ly = manual && !reduce ? look.yaw * lk : 0, lp = manual && !reduce ? look.pitch * lk : 0;
-    look.yaw -= look.yaw * lk; look.pitch -= look.pitch * lk;
+    // while the mouse moves: its speed x this frame's time, never past what's left to turn; once it stops (no report for
+    // 40 ms), the rest eases in over ~60 ms
+    var moving = now - lookT < 40, lk = Math.min(1, dt * LOOK_EASE);
+    var take = function (left, vel) { if (!moving) return left * lk; var st = vel * dt * 1000; return left > 0 ? clamp(st, 0, left) : clamp(st, left, 0); };
+    var ly = manual && !reduce ? take(look.yaw, lookVel.yaw) : look.yaw, lp = manual && !reduce ? take(look.pitch, lookVel.pitch) : look.pitch;
+    look.yaw -= ly; look.pitch -= lp;
+    if (!manual || reduce) ly = lp = 0;
     // (its rate smoothed over ~0.3 s: a mouse reports in uneven bursts, and the bank (and the seat's roll with it) took each
     // one as a jolt -- the HUD swam with every move, owner 2026-10-13)
     lookRate.yaw += ((dt ? ly / dt : 0) - lookRate.yaw) * Math.min(1, dt * 3); lookRate.pitch += ((dt ? lp / dt : 0) - lookRate.pitch) * Math.min(1, dt * 3);

@@ -50,8 +50,10 @@ look; it sits at `EYE0`, a little above and behind the centre). Frames: x right,
   `pose.pilot` says who's flying (AUTO or MANUAL); the right ring's toggle follows it.
 - **Mouse-look** (owner, 2026-10-13, replacing the mouse stick, which kept turning: the hidden cursor's offset from the
   centre set the turn rate and there was no centre to find): click the view to capture the mouse (pointer lock; a
-  crosshair cursor until then), and a move turns the nose by `LOOK_DEG` 0.12° a pixel, taken up over ~60 ms; stopping
-  holds it. Esc lets go. Mouse moves take over in HYBRID and TOUR like the keys, fire control keeps off the nose while
+  crosshair cursor until then), and a move turns the nose by `LOOK_DEG` 0.12° a pixel; stopping holds it. Each frame
+  turns by the mouse's speed (from the reports' own timestamps, smoothed over `LOOK_TAU` 45 ms) x its own time, and the
+  rest eases in once the mouse stops (until 2026-10-15 a frame took a share of the reports that had landed in it: 1, 2
+  or 3 every 8 ms, so at ~40 fps the view shook as it tilted). Esc lets go. Mouse moves take over in HYBRID and TOUR like the keys, fire control keeps off the nose while
   the mouse moves, and INPUT doesn't level a nose the mouse pointed. `SITE5.mouseLook(dx, dy)` (the tests call it).
 - **Head**: no looking round by dragging (taken out 2026-10-09). The head **leads every move** a little (0.15 x the turn
   rate, up to 12°; 0.21 x the climb rate, up to 10°) on a firm spring (damping 0.85; it was twice that and bouncier,
